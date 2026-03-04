@@ -117,12 +117,14 @@ export class BrainManager {
     }
 
     // --- INIT ---
-    async init(): Promise<void> {
+    async init(projectId?: string): Promise<void> {
         // Initialize required keys with valid empty state if they don't exist
         const hasIdentity = await this.get(BRAIN_KEYS.IDENTITY);
         if (!hasIdentity) {
             await this.set(BRAIN_KEYS.IDENTITY, {
-                role: 'memix agent',
+                name: projectId || this.projectId,
+                purpose: 'Memix brain for project ' + (projectId || this.projectId),
+                tech_stack: [],
                 core_objectives: [],
                 boundaries: []
             });

@@ -174,7 +174,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				}
 
 				// Actually initialize the Redis database keys
-				await brain.init();
+				await brain.init(projectId);
 
 				vscode.window.showInformationMessage(
 					`Memix: Initialized! Project ID: ${projectId}. Rules generated for ${rulesEngine.getConfig().ide}.`
