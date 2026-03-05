@@ -147,6 +147,14 @@ export class BrainManager {
                 user_preferences: {}
             });
         }
+
+        const hasTasks = await this.get(BRAIN_KEYS.TASKS);
+        if (!hasTasks) {
+            await this.set(BRAIN_KEYS.TASKS, {
+                current_list: null,
+                lists: []
+            });
+        }
     }
 
     // --- META ---

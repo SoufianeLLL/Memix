@@ -2,7 +2,7 @@
 	"name": "memix",
 	"displayName": "memix",
 	"description": "Persistent memory for AI coding assistants. Never re-explain your project again.",
-	"version": "0.1.0",
+	"version": "1.0.0-beta.1",
 	"publisher": "digitalvizellc",
 	"engines": {
 		"vscode": "^1.107.0"

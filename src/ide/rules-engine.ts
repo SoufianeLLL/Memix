@@ -26,8 +26,16 @@ export class RulesEngine {
             fs.mkdirSync(rulesDir, { recursive: true });
         }
 
-        const brainContent = getBrainTemplate(projectId, redisUrl);
-        const guardContent = getGuardTemplate(projectId);
+        let brainContent = getBrainTemplate(projectId, redisUrl);
+        let guardContent = getGuardTemplate(projectId);
+
+        // Antigravity requires YAML frontmatter for files in .agents/rules to be visible natively in the UI
+        if (this.config.ide === 'antigravity') {
+            const brainFrontmatter = `---\ntrigger: always_on\ndescription: Memix AI Brain: Primary persistent project memory and initialization rules.\n---\n`;
+            const guardFrontmatter = `---\ntrigger: always_on\ndescription: Memix Guard: Safety and integrity constraints for Redis brain access.\n---\n`;
+            brainContent = brainFrontmatter + brainContent;
+            guardContent = guardFrontmatter + guardContent;
+        }
 
         if (this.config.supportsMultipleFiles) {
             // Write both files
@@ -72,6 +80,7 @@ export class RulesEngine {
             this.config.rulesDir === '.'
                 ? this.config.rulesFile
                 : `${this.config.rulesDir}/`,
+            `.memix/`,
         ];
 
         if (fs.existsSync(gitignorePath)) {

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as redisClient from './core/redis-client';
 import { BrainManager } from './core/brain';
+import { BrainSync } from './core/brain-sync';
 import { MemoryOrchestrator } from './core/orchestrator';
 import { HealthMonitor } from './core/health';
 import { BrainPruner } from './core/pruner';
@@ -15,6 +16,7 @@ import { BRAIN_KEYS } from './utils/constants';
 import { SecretManager } from './core/secrets';
 
 let brain: BrainManager;
+let brainSync: BrainSync;
 let orchestrator: MemoryOrchestrator;
 let scorer: SessionScorer;
 let pruner: BrainPruner;
@@ -55,6 +57,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		const projectId = configProjectId || hashProjectId(path.basename(workspaceRoot));
 
 		brain = new BrainManager(projectId);
+		brainSync = new BrainSync(brain, workspaceRoot);
 		orchestrator = new MemoryOrchestrator(brain);
 		scorer = new SessionScorer(brain);
 		pruner = new BrainPruner(brain);
@@ -123,6 +126,12 @@ export async function activate(context: vscode.ExtensionContext) {
 					}
 				}
 
+				// Sync brain data to local .memix/brain/ files for AI access
+				if (brainSync) {
+					await brainSync.pullFromRedis();
+					brainSync.startWatcher();
+				}
+
 				panelProvider?.sendUpdate();
 			} catch (err: any) {
 				vscode.window.showErrorMessage(`Memix: Redis connection failed — ${err.message}`);
@@ -175,6 +184,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
 				// Actually initialize the Redis database keys
 				await brain.init(projectId);
+
+				// Sync newly-created brain keys to local files
+				if (brainSync) {
+					await brainSync.pullFromRedis();
+					brainSync.startWatcher();
+				}
 
 				vscode.window.showInformationMessage(
 					`Memix: Initialized! Project ID: ${projectId}. Rules generated for ${rulesEngine.getConfig().ide}.`
@@ -419,15 +434,21 @@ export async function activate(context: vscode.ExtensionContext) {
 	// --- AUTO-CONNECT on startup ---
 	const savedUrl = await secretManager.getSecret('redisUrl');
 	if (savedUrl) {
-		redisClient.connect(savedUrl).then(() => {
+		redisClient.connect(savedUrl).then(async () => {
 			// Auto-generate rules if not present
 			if (workspaceRoot && config.get<boolean>('autoGenerateRules')) {
 				const configProjectId = config.get<string>('projectId');
 				const projectId = configProjectId || hashProjectId(path.basename(workspaceRoot));
 				const rulesEngine = new RulesEngine(workspaceRoot);
 				if (!rulesEngine.rulesExist()) {
-					rulesEngine.generateRules(projectId, savedUrl);
+					await rulesEngine.generateRules(projectId, savedUrl);
 				}
+			}
+
+			// Sync brain data to local .memix/brain/ files for AI access
+			if (brainSync) {
+				await brainSync.pullFromRedis();
+				brainSync.startWatcher();
 			}
 		}).catch(() => {
 			// Silent fail on auto-connect — user can manually connect
@@ -437,5 +458,6 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
+	if (brainSync) { brainSync.stopWatcher(); }
 	redisClient.disconnect();
 }

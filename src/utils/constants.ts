@@ -6,6 +6,7 @@ export const BRAIN_KEYS = {
     PATTERNS: 'patterns',
     FILE_MAP: 'file_map',
     KNOWN_ISSUES: 'known_issues',
+    TASKS: 'tasks',
     CHECKPOINTS: 'checkpoints',
     TEAM_STATE: 'team:state',
     SCORING: 'scoring',
@@ -28,6 +29,7 @@ export const TAXONOMY_MAP: Record<string, string> = {
     [BRAIN_KEYS.PATTERNS]: MEMORY_TAXONOMY.PROCEDURAL,
     [BRAIN_KEYS.FILE_MAP]: MEMORY_TAXONOMY.SEMANTIC,
     [BRAIN_KEYS.KNOWN_ISSUES]: MEMORY_TAXONOMY.DIAGNOSTIC,
+    [BRAIN_KEYS.TASKS]: MEMORY_TAXONOMY.WORKING,
 };
 
 export const MAX_KEY_SIZE_BYTES = 4096;

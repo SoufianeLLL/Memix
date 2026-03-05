@@ -4,3 +4,12 @@ node_modules
 .vscode-test/
 .vscode/
 *.vsix
+.vscode/**
+.vscode-test/**
+# src/**
+node_modules/**
+.gitignore
+tsconfig.json
+webpack.config.js
+# **/*.ts
+# **/*.map

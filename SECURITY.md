@@ -45,7 +45,7 @@ Memix only communicates with the single Redis endpoint you provide. It does not 
 
 If you discover a security vulnerability in Memix, please report it responsibly:
 
-1. **Email**: security@digitalvize.com
+1. **Email**: support@digitalvize.com
 2. **Subject**: `[Memix Security] Brief description`
 3. **Include**: Steps to reproduce, potential impact, and your suggested fix (if any)
 

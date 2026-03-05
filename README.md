@@ -2,9 +2,9 @@
   <img src="media/icon.png" width="120" alt="Memix Logo" />
 </p>
 
-<h1 align="center">Memix — Persistent Memory for AI Coding Assistants</h1>
+<h1 align="left">Memix — Persistent Memory for AI Coding Assistants</h1>
 
-<p align="center">
+<p align="left">
   <b>Never re-explain your project again.</b><br/>
   Memix gives your AI coding assistant a <em>long-term brain</em> that persists across sessions, so it remembers your architecture, decisions, patterns, and preferences — even after you close your editor.
 </p>
@@ -17,7 +17,7 @@
 
 ---
 
-## 🧠 The Problem
+## The Problem
 
 Every time you start a new conversation with an AI assistant (GitHub Copilot, Cursor, Windsurf, Antigravity, etc.), it starts completely **blank**. It has no idea:
 
@@ -29,7 +29,7 @@ Every time you start a new conversation with an AI assistant (GitHub Copilot, Cu
 
 You end up **re-explaining the same context over and over again**, wasting time and getting worse results.
 
-## 💡 The Solution
+## The Solution
 
 **Memix** solves this by creating a structured, persistent **"brain"** for every project. This brain lives in a Redis database you control and is injected into your AI assistant's context automatically via rules files — so every new session starts with full project awareness.
 
@@ -37,23 +37,24 @@ Think of it like giving your AI assistant a **notebook** that it writes in and r
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 | Feature | Description |
 |---|---|
-| 🧠 **Persistent Brain** | Project identity, session logs, decisions, patterns, file maps, and known issues — all stored and recalled automatically. |
-| 🔄 **Session Continuity** | Pick up exactly where you left off. Your AI knows what you worked on last session, what files changed, and what's next. |
-| 👥 **Team Sync** | Share brain data across teammates so the whole team's AI assistants stay aligned on architecture and decisions. |
-| 🛡️ **Health Monitoring** | Built-in health checks detect stale data, oversized keys, corruption, and missing configuration — with one-click recovery. |
-| ✂️ **Smart Pruning** | Automatically trims old session logs and oversized data to keep your brain fast and within token budgets. |
-| 📦 **Import / Export** | Back up your brain to a JSON file or restore it on a different machine in seconds. |
-| 🔐 **Secure by Design** | Credentials are stored in your OS keychain (macOS Keychain, Windows Credential Manager, Linux libsecret) — never in plaintext config files. |
-| 🎯 **IDE Auto-Detection** | Automatically detects whether you're using VS Code, Cursor, Windsurf, or Antigravity and generates the correct rules file format. |
-| 📊 **Brain Monitor Panel** | A visual sidebar showing brain health, memory usage, session status, and quick actions — all in one place. |
+| **Persistent Brain** | Project identity, session logs, decisions, patterns, file maps, and known issues — all stored and recalled automatically. |
+| **Task Tracker** | Tasks never get lost. Append-only task lists persist across sessions with automatic status tracking (pending → in_progress → completed). |
+| **Session Continuity** | Pick up exactly where you left off. Your AI knows what you worked on last session, what files changed, and what's next. |
+| **Team Sync** | Share brain data across teammates so the whole team's AI assistants stay aligned on architecture and decisions. |
+| **Health Monitoring** | Built-in health checks detect stale data, oversized keys, corruption, and missing configuration — with one-click recovery. |
+| **Smart Pruning** | Automatically trims old session logs and oversized data to keep your brain fast and within token budgets. |
+| **Import / Export** | Back up your brain to a JSON file or restore it on a different machine in seconds. |
+| **Secure by Design** | Credentials are stored in your OS keychain (macOS Keychain, Windows Credential Manager, Linux libsecret) — never in plaintext config files. |
+| **IDE Auto-Detection** | Automatically detects whether you're using VS Code, Cursor, Windsurf, or Antigravity and generates the correct rules file format. |
+| **Brain Monitor Panel** | A visual sidebar showing brain health, memory usage, session status, and quick actions — all in one place. |
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -88,11 +89,11 @@ Think of it like giving your AI assistant a **notebook** that it writes in and r
 
 ---
 
-## 📖 Commands Reference
+## Commands Reference
 
 All commands are accessible via the **Command Palette** (`Cmd+Shift+P` / `Ctrl+Shift+P`) or from the **Brain Monitor** panel's action dropdown.
 
-### 🔌 Connect Redis
+### Connect Redis
 
 ```
 Memix: Connect Redis
@@ -104,7 +105,7 @@ Connects Memix to your Redis database. On first use, you'll be prompted for your
 
 ---
 
-### 🧠 Initialize Brain
+### Initialize Brain
 
 ```
 Memix: Initialize Brain
@@ -121,7 +122,7 @@ Creates the foundational data structure in Redis for your project. You'll be pro
 
 ---
 
-### 🔌 Disconnect Redis
+### Disconnect Redis
 
 ```
 Memix: Disconnect Redis
@@ -131,7 +132,7 @@ Disconnects Memix from the current Redis instance. Your brain data is safely pre
 
 ---
 
-### 📊 Open Debug Panel
+### Open Debug Panel
 
 ```
 Memix: Open Debug Panel
@@ -150,7 +151,7 @@ Opens the **Brain Monitor** sidebar panel. This gives you a real-time dashboard 
 
 ---
 
-### 📤 Export Brain
+### Export Brain
 
 ```
 Memix: Export Brain
@@ -164,7 +165,7 @@ Saves your entire brain to a `.json` file in your workspace. This is perfect for
 
 ---
 
-### 📥 Import Brain
+### Import Brain
 
 ```
 Memix: Import Brain
@@ -174,7 +175,7 @@ Restores brain data from a previously exported `.json` file. A file picker dialo
 
 ---
 
-### 🩺 Health Check
+### Health Check
 
 ```
 Memix: Health Check
@@ -191,7 +192,7 @@ Results are shown as an information / warning / error notification, depending on
 
 ---
 
-### ✂️ Prune Brain
+### Prune Brain
 
 ```
 Memix: Prune Brain
@@ -207,7 +208,7 @@ Intelligently trims oversized brain data to keep it fast and within your token b
 
 ---
 
-### 🗑️ Clear Brain
+### Clear Brain
 
 ```
 Memix: Clear Brain
@@ -217,7 +218,7 @@ Memix: Clear Brain
 
 ---
 
-### 🔄 Team Sync Setup
+### Team Sync Setup
 
 ```
 Memix: Team Sync Setup
@@ -233,7 +234,7 @@ Your Team ID is stored securely in your OS keychain. Share it privately with tea
 
 ---
 
-### 🔧 Recover Corrupted Brain
+### Recover Corrupted Brain
 
 ```
 Memix: Recover Corrupted Brain
@@ -243,7 +244,7 @@ Attempts to repair brain data that has become corrupted (e.g., invalid JSON, bro
 
 ---
 
-### ⏹️ End Session
+### End Session
 
 ```
 Memix: End Session
@@ -260,7 +261,7 @@ Marks the current working session as complete. This:
 
 ---
 
-### 🔐 Clear Stored Secrets
+### Clear Stored Secrets
 
 ```
 Memix: Clear Stored Secrets
@@ -272,7 +273,7 @@ Removes your stored Redis URL and Team ID from the operating system's secure key
 
 ---
 
-## ⚙️ Settings
+## Settings
 
 Configure Memix through VS Code's Settings UI (`Cmd+,` / `Ctrl+,`) or your `settings.json`:
 
@@ -288,7 +289,7 @@ Configure Memix through VS Code's Settings UI (`Cmd+,` / `Ctrl+,`) or your `sett
 
 ---
 
-## 🔐 Security
+## Security
 
 Memix takes security seriously:
 
@@ -301,7 +302,7 @@ For more details, see our [Security Policy](SECURITY.md).
 
 ---
 
-## 🤝 Team Sync — How It Works
+## Team Sync — How It Works
 
 Team Sync lets multiple developers share architectural context through a common Redis namespace:
 
@@ -314,18 +315,43 @@ This ensures every AI assistant on the team has the same understanding of the pr
 
 ---
 
-## 🔗 How Memix Works with Your AI Assistant
+## How Memix Works with Your AI Assistant
 
-Memix generates a **rules file** specific to your IDE:
+Memix uses a **two-layer architecture** to give your AI assistant persistent memory:
+
+### Layer 1: Local Brain Files
+
+When you connect to Redis and initialize your brain, Memix creates a `.memix/brain/` directory in your workspace with JSON files:
+
+```
+.memix/brain/
+├── identity.json          # Project name, purpose, tech stack
+├── session_state.json     # Current task, progress, next steps
+├── patterns.json          # Coding conventions and preferences
+├── decisions.json         # Architecture decisions and rationale
+├── file_map.json          # Key file purposes and dependencies
+├── known_issues.json      # Tracked bugs and tech debt
+└── session_log.json       # Historical session summaries
+```
+
+Your AI assistant reads and writes these files directly — using its native file tools, not terminal commands or external plugins.
+
+### Layer 2: Automatic Redis Sync
+
+The Memix extension watches the `.memix/brain/` directory. When your AI saves a file, the extension automatically syncs it to Redis through its own secure backend — with full validation, secret detection, and size checks. No MCP server, no `redis-cli`, no terminal commands.
+
+### Rules File Generation
+
+Memix also generates a **rules file** specific to your IDE:
 
 | IDE | Rules File |
 |---|---|
 | VS Code / GitHub Copilot | `.github/copilot-instructions.md` |
 | Cursor | `.cursor/rules/*.mdc` |
 | Windsurf | `.windsurfrules` |
-| Antigravity | `.gemini/settings.json` |
+| Antigravity | `.agents/rules/*.md` |
 
-This rules file tells your AI assistant to read the brain context from Redis at the start of every conversation. Your AI gets instant access to:
+This rules file instructs your AI assistant to read the brain files at the start of every conversation and update them after every task. Your AI gets instant access to:
 
 - Project identity and purpose
 - Current session state and progress
@@ -336,9 +362,22 @@ This rules file tells your AI assistant to read the brain context from Redis at 
 
 **No plugins or AI-side configuration required** — it works through the IDE's native rules/instructions mechanism.
 
+### What If the AI Forgets to Save?
+
+Sometimes AI assistants forget to update the brain files mid-conversation. Memix includes built-in voice commands you can type in chat:
+
+| Say This | What Happens |
+|---|---|
+| **"save brain"** | The AI immediately updates all `.memix/brain/*.json` files with the current state |
+| **"brain status"** | The AI reads all brain files and gives you a summary |
+| **"recap"** | The AI gives a full verbal summary from memory |
+| **"follow protocol"** | The AI re-reads the rules file, checks for missed saves, and catches up |
+| **"reboot brain"** | Full reload of all brain files — useful after interruptions |
+| **"end session"** | Saves everything, logs the session, and prepares for next time |
+
 ---
 
-## 🌍 Language Support
+## Language Support
 
 Memix works in **any programming language** and with **any project type**. The brain stores metadata *about* your project, not the code itself. Whether you're building a React app, a Python API, a Rust library, or a mobile app — Memix enhances your AI assistant's understanding of the project context.
 
@@ -346,7 +385,7 @@ The extension UI and commands are currently in **English**. Multi-language UI su
 
 ---
 
-## 📋 Requirements
+## Requirements
 
 | Requirement | Details |
 |---|---|
@@ -357,16 +396,16 @@ The extension UI and commands are currently in **English**. Multi-language UI su
 
 ---
 
-## 🐛 Known Issues
+## Known Issues
 
 - The extension requires an active Redis connection for all brain operations. If Redis is unavailable, brain reads/writes will fail gracefully with error messages.
 - Team Sync currently uses a simple push/pull model. Real-time collaboration and conflict resolution are planned for future versions.
 
 ---
 
-## 📝 Release Notes
+## Release Notes
 
-### 0.1.0 — Initial Release
+### 1.0.0-beta.1 — Initial Release
 
 - Persistent brain storage with Redis
 - Session tracking and continuity
@@ -380,7 +419,7 @@ The extension UI and commands are currently in **English**. Multi-language UI su
 
 ---
 
-## 📜 License
+## License
 
 Memix is **free to use** but is proprietary software. See the [LICENSE](LICENSE) file for details.
 
@@ -388,7 +427,7 @@ Memix is **free to use** but is proprietary software. See the [LICENSE](LICENSE)
 
 ---
 
-## 🔗 Links
+## Links
 
 - [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=digitalvizellc.memix)
 - [GitHub Repository](https://github.com/SoufianeLLL/Memix)
@@ -398,5 +437,5 @@ Memix is **free to use** but is proprietary software. See the [LICENSE](LICENSE)
 ---
 
 <p align="center">
-  Made with ❤️ by <a href="https://github.com/SoufianeLLL">Soufiane Loudaini</a> · <a href="https://digitalvize.com">DigitalVize LLC</a>
+  Made with ❤️ by <a href="https://www.linkedin.com/in/loudaini">Soufiane Loudaini</a> · <a href="https://digitalvize.com">DigitalVize LLC</a>
 </p>
