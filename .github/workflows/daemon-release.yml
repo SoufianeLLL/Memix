@@ -1,0 +1,173 @@
+name: Daemon Release
+
+on:
+  push:
+    tags:
+      - 'daemon-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.binary }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            binary: memix-daemon-darwin-arm64
+            use_cross: false
+
+          - os: macos-13
+            target: x86_64-apple-darwin
+            binary: memix-daemon-darwin-x64
+            use_cross: false
+
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+            binary: memix-daemon-linux-x64
+            use_cross: false
+
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-musl
+            binary: memix-daemon-linux-arm64
+            use_cross: true
+
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            binary: memix-daemon-windows-x64.exe
+            use_cross: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross (Linux ARM64 only)
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Install musl tools (Linux only)
+        if: runner.os == 'Linux' && !matrix.use_cross
+        run: sudo apt-get install -y musl-tools
+
+      - name: Build (native)
+        if: '!matrix.use_cross'
+        working-directory: daemon
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build (cross)
+        if: matrix.use_cross
+        working-directory: daemon
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Rename binary
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [[ "${{ matrix.os }}" == "windows-2022" ]]; then
+            cp daemon/target/${{ matrix.target }}/release/memix-daemon.exe dist/${{ matrix.binary }}
+          else
+            cp daemon/target/${{ matrix.target }}/release/memix-daemon dist/${{ matrix.binary }}
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary }}
+          path: dist/${{ matrix.binary }}
+
+  release:
+    name: Create Release + Manifest
+    needs: build
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Flatten dist folder
+        run: |
+          find dist -type f -exec mv {} dist/ \;
+          find dist -type d -empty -delete
+
+      - name: Compute SHA-256 checksums
+        id: checksums
+        run: |
+          cd dist
+          for f in memix-daemon-*; do
+            sha256sum "$f" >> ../checksums.txt
+          done
+          cat ../checksums.txt
+
+      - name: Generate manifest.json
+        run: |
+          VERSION="${GITHUB_REF_NAME#daemon-v}"
+          node -e "
+            const fs = require('fs');
+            const lines = fs.readFileSync('checksums.txt', 'utf8').trim().split('\n');
+            const checksums = {};
+            for (const line of lines) {
+              const [hash, file] = line.split(/\s+/);
+              checksums[file.replace('memix-daemon-', '').replace('.exe', '')] = hash;
+            }
+            const base = 'https://github.com/' + process.env.GITHUB_REPOSITORY + '/releases/download/' + process.env.GITHUB_REF_NAME;
+            const manifest = {
+              version: process.env.VERSION,
+              released_at: new Date().toISOString(),
+              binaries: {
+                'darwin-arm64':  { url: base + '/memix-daemon-darwin-arm64',      sha256: checksums['darwin-arm64'] },
+                'darwin-x64':    { url: base + '/memix-daemon-darwin-x64',        sha256: checksums['darwin-x64'] },
+                'linux-x64':     { url: base + '/memix-daemon-linux-x64',         sha256: checksums['linux-x64'] },
+                'linux-arm64':   { url: base + '/memix-daemon-linux-arm64',       sha256: checksums['linux-arm64'] },
+                'windows-x64':   { url: base + '/memix-daemon-windows-x64.exe',   sha256: checksums['windows-x64'] },
+              }
+            };
+            fs.writeFileSync('manifest.json', JSON.stringify(manifest, null, 2));
+            console.log(JSON.stringify(manifest, null, 2));
+          "
+        env:
+          VERSION: ${{ github.ref_name }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
+      - name: Normalize manifest version
+        run: |
+          node -e "
+            const fs = require('fs');
+            const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+            manifest.version = manifest.version.replace(/^daemon-v/, '').replace(/^v/, '');
+            fs.writeFileSync('manifest.json', JSON.stringify(manifest, null, 2));
+            console.log(JSON.stringify(manifest, null, 2));
+          "
+
+      - name: Upload binaries to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Daemon ${{ github.ref_name }}"
+          files: |
+            dist/memix-daemon-*
+            manifest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push manifest to api.memix.dev
+        # POSTs the new manifest to your Next.js API so it serves the latest immediately
+        # The MANIFEST_DEPLOY_SECRET is a shared secret you set in both GitHub secrets
+        # and your Next.js MANIFEST_DEPLOY_SECRET env var on Vercel
+        run: |
+          curl --fail --silent --show-error -X POST https://api.memix.dev/daemon/manifest \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.MANIFEST_DEPLOY_SECRET }}" \
+            -d @manifest.json

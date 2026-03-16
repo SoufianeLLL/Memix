@@ -1,15 +1,27 @@
-out
-dist
-node_modules
+# Node & VS Code Extension
+node_modules/
+dist/
+out/
 .vscode-test/
-.vscode/
 *.vsix
-.vscode/**
-.vscode-test/**
-# src/**
-node_modules/**
-.gitignore
-tsconfig.json
-webpack.config.js
-# **/*.ts
-# **/*.map
+.DS_Store
+**/.vscode
+**/bin/
+scripts/
+
+# Rust Daemon
+daemon/target/
+**/*.rs.bk
+
+# Environment & Config
+.env
+.env.local
+.memix/
+
+# IDE
+.vscode/launch.json
+.idea/
+
+# AI Rules
+.windsurf
+.windsurfrules

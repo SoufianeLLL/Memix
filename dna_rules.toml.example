@@ -1,0 +1,43 @@
+# Memix DNA Rules Configuration
+# ──────────────────────────────────────
+# Define custom security rules for Code DNA detection.
+# Rules declared here are evaluated before built-in defaults.
+# The DNA detection loads this file from the workspace root (or ~/.memix/).
+
+[[file_category_rules]]
+id = "custom-feature-category"
+classify_as = "feature-module"
+languages = ["typescript", "tsx"]
+path_patterns = ["(^|/)(features)(/|$)"]
+requires_any_patterns = []
+requires_all_patterns = []
+entity_kinds = []
+
+[[pattern_rules]]
+id = "custom-command-pattern"
+tag = "command-handler"
+languages = ["typescript", "javascript"]
+path_patterns = ["(^|/)(commands)(/|$)"]
+name_patterns = ["(?i)(command|execute|handler)"]
+entity_kinds = ["function"]
+
+[[architecture_rules]]
+id = "custom-hexagonal-architecture"
+architecture = "hexagonal/modular-monolith"
+min_dependency_depth = 2
+require_dense_dependency_graph = false
+
+[[architecture_rules.required_categories]]
+value = "domain-services"
+min_count = 1
+
+[[architecture_rules.required_patterns]]
+value = "adapter"
+min_count = 1
+
+[[error_handling_rules]]
+id = "custom-result-pattern"
+label = "result-pattern"
+languages = ["rust"]
+body_patterns = ["Result<", "anyhow::Result", "\\bOk\\(", "\\bErr\\("]
+min_matches = 1

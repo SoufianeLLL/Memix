@@ -1,0 +1,274 @@
+name: Extension Release
+
+on:
+  push:
+    tags:
+      - 'extension-v*'
+
+  # Allow manual trigger from GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (package only, do not publish)'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: Validate & Test
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: extension
+        run: npm ci
+
+      - name: TypeScript type check
+        working-directory: extension
+        run: npx tsc --noEmit
+
+      - name: Lint
+        working-directory: extension
+        run: npm run lint --if-present
+
+      - name: Run tests
+        working-directory: extension
+        run: npm test --if-present
+
+  package:
+    name: Package VSIX
+    needs: validate
+    runs-on: ubuntu-22.04
+
+    outputs:
+      vsix_name: ${{ steps.package.outputs.vsix_name }}
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: extension
+        run: npm ci
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          # Tag is extension-v0.9.1 → version is 0.9.1
+          VERSION="${GITHUB_REF_NAME#extension-v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Publishing version: ${VERSION}"
+
+      - name: Verify package.json version matches tag
+        working-directory: extension
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "❌ package.json version ($PKG_VERSION) does not match tag ($TAG_VERSION)"
+            echo "Update package.json version before tagging."
+            exit 1
+          fi
+          echo "✅ Version match: $PKG_VERSION"
+
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+
+      - name: Build extension
+        working-directory: extension
+        run: npm run compile
+
+      - name: Package VSIX
+        id: package
+        working-directory: extension
+        run: |
+          VSIX_NAME="memix-${{ steps.version.outputs.version }}.vsix"
+          vsce package --out "$VSIX_NAME" --no-dependencies
+          echo "vsix_name=${VSIX_NAME}" >> $GITHUB_OUTPUT
+          echo "Packaged: ${VSIX_NAME}"
+          # Print size so you can track it over time
+          du -sh "$VSIX_NAME"
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: extension/${{ steps.package.outputs.vsix_name }}
+          retention-days: 30
+
+  publish-marketplace:
+    name: Publish to VS Code Marketplace
+    needs: package
+    runs-on: ubuntu-22.04
+    # Skip publish on dry run
+    if: github.event.inputs.dry_run != 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: extension
+        run: npm ci
+
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+
+      - name: Build extension
+        working-directory: extension
+        run: npm run compile
+
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vsix
+          path: extension/
+
+      - name: Publish to VS Code Marketplace
+        working-directory: extension
+        env:
+          VS_MARKETPLACE_TOKEN: ${{ secrets.VS_MARKETPLACE_TOKEN }}
+        run: |
+          vsce publish --pat "$VS_MARKETPLACE_TOKEN" --packagePath "${{ needs.package.outputs.vsix_name }}"
+
+  publish-ovsx:
+    name: Publish to Open VSX (VSCodium / Cursor)
+    needs: package
+    runs-on: ubuntu-22.04
+    # Skip publish on dry run
+    if: github.event.inputs.dry_run != 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: extension
+        run: npm ci
+
+      - name: Install ovsx
+        run: npm install -g ovsx
+
+      - name: Build extension
+        working-directory: extension
+        run: npm run compile
+
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vsix
+          path: extension/
+
+      - name: Publish to Open VSX
+        working-directory: extension
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          ovsx publish "${{ needs.package.outputs.vsix_name }}" --pat "$OVSX_PAT"
+
+  github-release:
+    name: Create GitHub Release
+    needs: [package, publish-marketplace, publish-ovsx]
+    runs-on: ubuntu-22.04
+    if: github.event.inputs.dry_run != 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # needed to generate changelog
+
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vsix
+          path: dist/
+
+      - name: Generate changelog from commits
+        id: changelog
+        run: |
+          # Get commits since last extension tag
+          PREV_TAG=$(git tag --sort=-version:refname | grep '^extension-v' | sed -n '2p')
+          if [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+          echo "Generating changelog from $PREV_TAG to $GITHUB_REF_NAME"
+          CHANGELOG=$(git log "${PREV_TAG}..HEAD" \
+            --pretty=format:"- %s (%h)" \
+            -- extension/ \
+            | head -50)
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Extension v${{ needs.package.outputs.version }}"
+          body: |
+            ## Memix Extension v${{ needs.package.outputs.version }}
+
+            ### What changed
+            ${{ steps.changelog.outputs.changelog }}
+
+            ### Install
+            Search **"Memix"** in the VS Code Extensions panel, or install manually:
+
+            ```bash
+            code --install-extension memix-${{ needs.package.outputs.version }}.vsix
+            ```
+
+            ### Links
+            - [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=digitalvizellc.memix)
+            - [Open VSX](https://open-vsx.org/extension/digitalvizellc/memix)
+          files: |
+            dist/${{ needs.package.outputs.vsix_name }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify-failure:
+    name: Notify on Failure
+    needs: [validate, package, publish-marketplace, publish-ovsx, github-release]
+    runs-on: ubuntu-22.04
+    if: failure()
+
+    steps:
+      - name: Report failure
+        run: |
+          echo "❌ Extension release pipeline failed for ${{ github.ref_name }}"
+          echo "Check the Actions tab: https://github.com/SoufianeLLL/Memix/actions"
+          # If you add a Discord/Slack webhook later, call it here

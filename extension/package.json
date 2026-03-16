@@ -1,0 +1,244 @@
+{
+	"name": "memix",
+	"displayName": "Memix - AI Memory Bridge",
+	"description": "An autonomous coding intelligence layer that OBSERVES, UNDERSTANDS, PREDICTS, and REMEMBERS — independently of the AI model. Works with VS Code, Cursor, Windsurf, Antigravity, and Claude Code.",
+	"version": "1.0.0-beta.5",
+	"publisher": "digitalvizellc",
+	"engines": {
+		"vscode": "^1.107.0"
+	},
+	"categories": [
+		"AI",
+		"Other"
+	],
+	"keywords": [
+		"ai",
+		"memory",
+		"cursor",
+		"windsurf",
+		"antigravity",
+		"openai",
+		"claude",
+		"copilot",
+		"context"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/SoufianeLLL/Memix"
+	},
+	"license": "MIT",
+	"icon": "media/memix-logo.png",
+	"activationEvents": [
+		"onStartupFinished"
+	],
+	"main": "./dist/extension.js",
+	"contributes": {
+		"commands": [
+			{
+				"command": "memix.init",
+				"title": "Memix: Initialize Brain"
+			},
+			{
+				"command": "memix.connect",
+				"title": "Memix: Connect Redis"
+			},
+			{
+				"command": "memix.disconnect",
+				"title": "Memix: Disconnect Redis"
+			},
+			{
+				"command": "memix.showPanel",
+				"title": "Memix: Open Debug Panel"
+			},
+			{
+				"command": "memix.exportBrain",
+				"title": "Memix: Export Brain"
+			},
+			{
+				"command": "memix.importBrain",
+				"title": "Memix: Import Brain"
+			},
+			{
+				"command": "memix.exportBrainMirror",
+				"title": "Memix: Export Brain Mirror"
+			},
+			{
+				"command": "memix.importBrainMirror",
+				"title": "Memix: Import Brain Mirror"
+			},
+			{
+				"command": "memix.migrateBrain",
+				"title": "Memix: Run Brain Migrations"
+			},
+			{
+				"command": "memix.healthCheck",
+				"title": "Memix: Health Check"
+			},
+			{
+				"command": "memix.prune",
+				"title": "Memix: Prune Brain"
+			},
+			{
+				"command": "memix.clearBrain",
+				"title": "Memix: Clear Brain"
+			},
+			{
+				"command": "memix.teamSync",
+				"title": "Memix: Team Sync Setup"
+			},
+			{
+				"command": "memix.activateLicense",
+				"title": "Memix: Activate License"
+			},
+			{
+				"command": "memix.recoverBrain",
+				"title": "Memix: Recover Corrupted Brain"
+			},
+			{
+				"command": "memix.endSession",
+				"title": "Memix: End Session"
+			},
+			{
+				"command": "memix.clearSecrets",
+				"title": "Memix: Clear Stored Secrets"
+			},
+			{
+				"command": "memix.showActions",
+				"title": "Memix Settings",
+				"icon": "$(gear)"
+			},
+			{
+				"command": "memix.copyPromptPack",
+				"title": "Memix: Copy Prompt Pack"
+			},
+			{
+				"command": "memix.refreshPanel",
+				"title": "Refresh Panel",
+				"icon": "$(refresh)"
+			}
+		],
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "memix-sidebar",
+					"title": "Memix",
+					"icon": "media/memix.png"
+				}
+			]
+		},
+		"menus": {
+			"commandPalette": [
+				{
+					"command": "memix.connect",
+					"when": "!memix.isConnected"
+				},
+				{
+					"command": "memix.init",
+					"when": "!memix.isInitialized"
+				}
+			],
+			"view/title": [
+				{
+					"command": "memix.refreshPanel",
+					"when": "view == memix.debugPanel",
+					"group": "navigation@1"
+				},
+				{
+					"command": "memix.showActions",
+					"when": "view == memix.debugPanel",
+					"group": "navigation@2"
+				}
+			]
+		},
+		"views": {
+			"memix-sidebar": [
+				{
+					"icon": "media/memix.png",
+					"type": "webview",
+					"id": "memix.debugPanel",
+					"name": "Brain Monitor"
+				}
+			]
+		},
+		"configuration": {
+			"title": "Memix",
+			"properties": {
+				"memix.redis.maxMemoryMbOverride": {
+					"type": "number",
+					"default": 0,
+					"description": "Optional: override Redis max memory (MB) used for the Brain Monitor Redis Dataset progress bar. Useful for providers that don't expose maxmemory (e.g., Redis Cloud free tier 30MB). Set to 0 to auto-detect."
+				},
+				"memix.projectId": {
+					"type": "string",
+					"default": "",
+					"description": "Project identifier (auto-detected from folder name if empty)"
+				},
+				"memix.maxBrainSizeKB": {
+					"type": "number",
+					"default": 512,
+					"description": "Maximum brain size in KB before auto-pruning"
+				},
+				"memix.maxTokenBudget": {
+					"type": "number",
+					"default": 4000,
+					"description": "Max tokens to inject into AI context"
+				},
+				"memix.autoSave": {
+					"type": "boolean",
+					"default": true,
+					"description": "Automatically save brain state"
+				},
+				"memix.autoGenerateRules": {
+					"type": "boolean",
+					"default": true,
+					"description": "Auto-generate AI rules files on project open"
+				},
+				"memix.dev.externalDaemon": {
+					"type": "boolean",
+					"default": false,
+					"description": "Development: do not spawn/stop the daemon. Connect to an already-running daemon (Unix socket by default, or TCP via memix.dev.daemonHttpUrl / MEMIX_DAEMON_HTTP_URL). Can also be enabled via MEMIX_DEV_EXTERNAL_DAEMON=true"
+				},
+				"memix.dev.daemonHttpUrl": {
+					"type": "string",
+					"default": "http://127.0.0.1:3456",
+					"description": "Development: daemon base URL when using TCP (used in external daemon mode)."
+				}
+			}
+		}
+	},
+	"scripts": {
+		"sync:versions": "node ../scripts/sync-versions.mjs",
+		"package": "vsce package",
+		"publish": "vsce publish",
+		"vscode:prepublish": "npm run compile",
+		"compile": "webpack",
+		"watch": "webpack --watch",
+		"lint": "eslint src --ext ts",
+		"test": "node ./out/test/runTest.js"
+	},
+	"vsce": {
+		"dependencies": false,
+		"yarn": false
+	},
+	"devDependencies": {
+		"@types/crypto-js": "^4.2.2",
+		"@types/dotenv": "^6.1.1",
+		"@types/mocha": "^10.0.10",
+		"@types/node": "22.x",
+		"@types/uuid": "^10.0.0",
+		"@types/vscode": "^1.107.0",
+		"@vscode/test-cli": "^0.0.11",
+		"@vscode/test-electron": "^2.5.2",
+		"eslint": "^9.39.3",
+		"ts-loader": "^9.5.4",
+		"typescript": "^5.9.3",
+		"typescript-eslint": "^8.56.1",
+		"webpack": "^5.105.3",
+		"webpack-cli": "^6.0.1"
+	},
+	"dependencies": {
+		"crypto-js": "^4.2.0",
+		"dotenv": "^16.6.1",
+		"uuid": "^13.0.0"
+	}
+}

@@ -1,0 +1,66 @@
+# Memix Security Scanner Configuration
+# ──────────────────────────────────────
+# Define custom security rules for the SecurityScanner agent.
+# Each [[rules]] block specifies a regex pattern to detect and its severity.
+# The scanner loads this file from the workspace root (or ~/.memix/).
+# If this file is absent, built-in default rules are used.
+
+[[rules]]
+id = "hardcoded-secret"
+pattern = '(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*[''"][A-Za-z0-9_\-]{8,}[''"]'
+message = "Potential hardcoded credential detected"
+severity = "critical"
+
+[[rules]]
+id = "unsafe-eval"
+pattern = '\beval\s*\(|\bexec\s*\('
+message = "Dynamic code execution (eval/exec) detected — review for injection risk"
+severity = "critical"
+
+[[rules]]
+id = "sql-concatenation"
+pattern = '(?i)(select|insert|update|delete).*(\\+|format!\(|f")'
+message = "Possible SQL string concatenation — use parameterized queries"
+severity = "warning"
+
+[[rules]]
+id = "env-exposure"
+pattern = 'process\.env\.[A-Z0-9_]+|std::env::var\('
+message = "Environment variable access — verify values are not leaked to logs or clients"
+severity = "info"
+
+[[rules]]
+id = "todo-fixme"
+pattern = '(?i)(TODO|FIXME|HACK|XXX|TEMP)\b'
+message = "Unresolved TODO/FIXME marker"
+severity = "info"
+
+[[rules]]
+id = "console-log"
+pattern = 'console\.(log|warn|error|debug|info)\s*\('
+message = "Console output in production code — consider removing or using a logger"
+severity = "info"
+
+[[rules]]
+id = "hardcoded-ip"
+pattern = '\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b'
+message = "Hardcoded IP address — consider using configuration"
+severity = "warning"
+
+[[rules]]
+id = "insecure-http"
+pattern = 'http://[^\s"''`\)]+'
+message = "Insecure HTTP URL — use HTTPS where possible"
+severity = "warning"
+
+[[rules]]
+id = "password-in-url"
+pattern = '(?i)(password|passwd|pwd)=[^&\s]+'
+message = "Password embedded in URL query string"
+severity = "critical"
+
+[[rules]]
+id = "weak-crypto"
+pattern = '(?i)\b(md5|sha1)\s*\('
+message = "Weak cryptographic hash function — use SHA-256 or stronger"
+severity = "warning"
