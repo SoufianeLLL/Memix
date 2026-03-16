@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="media/memix.png" width="120" alt="Memix Logo" />
+  <img src="media/memix-logo.png" width="120" alt="Memix Logo" />
 </p>
 
 # Memix — The Autonomous AI Memory Bridge

@@ -23,9 +23,12 @@ jobs:
       
     - name: Install Dependencies
       run: npm install
+      working-directory: ./extension
       
     - name: Compile Extension
       run: npm run compile
+      working-directory: ./extension
       
     - name: Run Tests
       run: npm test
+      working-directory: ./extension
