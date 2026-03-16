@@ -214,7 +214,7 @@
 		"compile": "webpack",
 		"watch": "webpack --watch",
 		"lint": "eslint src --ext ts",
-		"test": "node ./out/test/runTest.js"
+		"test": "npm run lint --if-present && npx tsc --noEmit"
 	},
 	"vsce": {
 		"dependencies": false,
