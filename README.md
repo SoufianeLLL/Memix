@@ -1,21 +1,28 @@
 <p align="center">
-  <img src="media/memix-logo.png" width="120" alt="Memix Logo" />
+  <img src="media/memix-logo.png" width="80" alt="Memix Logo" />
 </p>
 
-# Memix — The Autonomous AI Memory Bridge
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=digitalvizellc.memix"><img src="https://img.shields.io/visual-studio-marketplace/v/digitalvizellc.memix?label=VS%20Marketplace&color=0078D4&logo=visual-studio-code" alt="VS Marketplace" /></a>
+  <a href="./main/daemon"><img src="https://img.shields.io/badge/daemon-v0.1.0--beta-green?style=flat" alt="Daemon version" /></a>
+  <a href="./main/extension"><img src="https://img.shields.io/badge/extension-v1.0.0--beta--5-orange?style=flat" alt="Extension version" /></a>
+</p>
+
+<h1 align="center">
+  Memix — The Autonomous AI Memory Bridge
+</h1>
 
 Memix isn't just another AI coding assistant. It's an **autonomous intelligence layer** that runs silently in the background of your IDE, continuously observing, predicting, and remembering everything about your codebase. 
 
 While other tools wait for you to ask a question, Memix is already understanding the context, mapping your architecture, and preparing the exact codebase memories your AI needs before you even open the chat.
 
-
+<br/>
 <p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=digitalvizellc.memix"><img src="https://img.shields.io/visual-studio-marketplace/v/digitalvizellc.memix?label=VS%20Marketplace&color=0078D4&logo=visual-studio-code" alt="VS Marketplace" /></a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=digitalvizellc.memix"><img src="https://img.shields.io/visual-studio-marketplace/d/digitalvizellc.memix?color=4EC9B0" alt="Downloads" /></a>
-  <a href="https://github.com/SoufianeLLL/Memix/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Proprietary-red" alt="License" /></a>
+  <a href="./daemon/LICENSE-BSL.md"><img src="https://img.shields.io/badge/Daemon%20License-BSL%201.1-black?style=flat" alt="Daemon license" /></a>
+  <a href="./extension/LICENSE"><img src="https://img.shields.io/badge/Extension%20License-MIT-black?style=flat" alt="Extension license" /></a>
 </p>
+<br/>
 
-<br/><br/>
 ## Requirements
 
 - **A Redis instance is required** to store your project brain.
@@ -25,19 +32,19 @@ While other tools wait for you to ask a question, Memix is already understanding
 <br/><br/>
 ## Features
 
-### ✅ Persistent Project Brain (Redis-backed)
+### Persistent Project Brain (Redis-backed)
 Stores identity, session state, tasks, decisions, patterns, file map, and known issues so your AI resumes with continuity.
 
-### ✅ Daemon-Managed JSON Mirror (`.memix/brain/*.json`)
+### Daemon-Managed JSON Mirror (`.memix/brain/*.json`)
 Every successful brain write is mirrored to workspace-local JSON files. This gives your AI and tooling an instant, file-based read path without direct Redis access.
 
-### ✅ Safe AI Writeback via `pending.json`
+### Safe AI Writeback via `pending.json`
 AI agents can propose writes by creating `.memix/brain/pending.json`. The daemon validates, applies, writes `pending.ack.json`, and clears pending input.
 
-### ✅ AST-driven Code DNA + Architecture Explainability
+### AST-driven Code DNA + Architecture Explainability
 Memix computes project DNA from Tree-Sitter ASTs across **13 languages** (TypeScript, JavaScript, Rust, Python, Go, Java, C/C++, C#, Ruby, Swift, Kotlin, PHP). That means language-aware cyclomatic complexity, structural pattern tagging, exported symbol detection, architecture inference, hot-zone ranking, circular risk detection, and a short explainability summary you can inject directly into AI context.
 
-### ✅ Configurable DNA Rules Per Project
+### Configurable DNA Rules Per Project
 Observer DNA can be tuned with workspace-local overrides in `dna_rules.toml`, letting you classify custom folders, tag proprietary patterns, and handle project-specific edge cases without changing the daemon code.
 
 Config discovery order:
@@ -47,42 +54,42 @@ Config discovery order:
 
 Start from `dna_rules.toml.example`.
 
-### ✅ Autonomous Codebase Observation
+### Autonomous Codebase Observation
 Memix quietly monitors your active workspace. As you scaffold new files, refactor architecture, or fix bugs, the Memory Engine natively understands the intent behind your changes. It maps how your functions connect together in real-time.
 
-### ✅ Zero-Latency Context Routing
+### Zero-Latency Context Routing
 Tired of manually highlighting code so your AI understands what you're talking about? Memix pre-loads the exact files, dependencies, and historical decisions into your AI's context window. When you ask a question, the AI already knows the answer.
 
-### ✅ Ironclad Privacy & Offline Execution
+### Ironclad Privacy & Offline Execution
 Your code never leaves your machine unless you explicitly prompt your AI model. Memix operates entirely natively on your hardware. It builds lightning-fast semantic graphs, vector indexes, and structural models running at purely native performance.
 
-### ✅ Seamless Team Sync
+### Seamless Team Sync
 Memix ensures your entire developer team shares the exact same codebase "brain." Architectural decisions, API boundaries, and feature plans sync effortlessly without conflict, ensuring every developer—and every AI agent—is on the identical page.
 
-### ✅ One-click Health Check
+### One-click Health Check
 Validates required brain keys, detects invalid shapes, staleness, and oversized entries.
 
-### ✅ Brain Key Coverage (Advanced)
+### Brain Key Coverage (Advanced)
 Shows which brain keys exist, their sizes, and their taxonomy so you can quickly spot missing categories before an AI session.
 
-### ✅ Prompt Pack Preview + One-click Copy (Advanced)
+### Prompt Pack Preview + One-click Copy (Advanced)
 Generates a ready-to-paste context bundle (identity, session state, patterns, decisions, known issues, tasks, file map). Includes a token estimate so you can fit it into any model’s context window.
 
-### ✅ Mirror Import / Export + Migrations
+### Mirror Import / Export + Migrations
 - Daemon endpoints for full mirror export/import.
 - Schema migrations endpoint for project backfills (for example: vector backfill).
 - Helps keep old projects up to date as Memix capabilities evolve.
 
-### ✅ Token utilities (daemon)
+### Token utilities (daemon)
 Exact token counting and budget-based context selection.
 
-### ✅ Context Compiler (daemon)
+### Context Compiler (daemon)
 Memix compiles a task-focused context packet from the active file, recent history, project rules, and brain state using a **7-pass optimization pipeline** with DP knapsack budget fitting. This keeps prompts smaller, more relevant, and optimally allocated — not heuristic.
 
-### ✅ AGENTS Runtime (daemon)
+### AGENTS Runtime (daemon)
 `AGENTS.md` now drives daemon-side autonomous agents that run independently of the chat model. Memix can parse agent definitions, execute supported triggers, and persist agent reports for later AI or developer consumption.
 
-### ✅ Proactive Risk Analysis + Configurable Security Scanner
+### Proactive Risk Analysis + Configurable Security Scanner
 Before risky edits, Memix scores a file using dependents, known issues, past breakage signals, and stability indicators. The built-in security scanner loads configurable rules from `memix-security.toml` (10 default rules across critical/warning/info severity).
 
 Config discovery order:
@@ -90,13 +97,13 @@ Config discovery order:
 - Workspace fallback: `.memix/memix-security.toml`
 - User override: `~/.memix/memix-security.toml`
 
-### ✅ Learning Layer + Cross-Project Profile
+### Learning Layer + Cross-Project Profile
 Memix can learn from prompt outcomes, compare model performance by task type, and derive a cross-project developer profile so future context assembly gets better over time.
 
-### ✅ Brain Hierarchy / Context Inheritance
+### Brain Hierarchy / Context Inheritance
 Layered brain resolution supports parent-child context inheritance for monorepos and nested project structures.
 
-### ✅ Observer + Session APIs
+### Observer + Session APIs
 - `/api/v1/observer/graph`
 - `/api/v1/observer/changes`
 - `/api/v1/observer/dna`
@@ -104,7 +111,7 @@ Layered brain resolution supports parent-child context inheritance for monorepos
 - `/api/v1/session/current`
 - `/api/v1/session/replay`
 
-### ✅ New intelligence APIs
+### New intelligence APIs
 - `/api/v1/context/compile`
 - `/api/v1/agents/config`
 - `/api/v1/agents/reports`
@@ -114,16 +121,16 @@ Layered brain resolution supports parent-child context inheritance for monorepos
 - `/api/v1/learning/developer-profile`
 - `/api/v1/brain/hierarchy/resolve`
 
-### ✅ Advanced panel UX for large payloads
+### Advanced panel UX for large payloads
 Large artifacts like Prompt Pack and Observer DNA OTel export are presented as action-first summaries with modal detail views and copy actions instead of dumping raw JSON inline.
 
-### ✅ Local daemon over Unix Socket + TCP
+### Local daemon over Unix Socket + TCP
 A local Axum (Rust) daemon powers memory APIs, rules generation, observer snapshots, migrations, and mirror sync.
 
-### ✅ Smarter Similarity Search
+### Smarter Similarity Search
 Hybrid similarity now combines normalized vector similarity (cosine) with keyword overlap for stronger relevance.
 
-### ✅ Optional Real Embeddings (feature-flagged)
+### Optional Real Embeddings (feature-flagged)
 `all-MiniLM-L6-v2` via `fastembed` is available behind `real_embeddings` so default builds remain stable on environments without ONNX runtime support.
 
 <br/>
@@ -215,3 +222,10 @@ If Memix saves you time, please support the project:
 
 ## License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## License
+
+- The VS Code extension and GitHub-facing repository assets are licensed under the [MIT License](./extension/LICENSE).
+- The Rust daemon is licensed under the [Business Source License 1.1](./daemon/LICENSE-BSL.md).
+
+If you are evaluating reuse or redistribution, check the license file for the specific component you are using.

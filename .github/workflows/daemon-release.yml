@@ -48,19 +48,40 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y musl-tools protobuf-compiler
 
+      - name: Set PROTOC (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          echo "PROTOC=/usr/bin/protoc" >> "$GITHUB_ENV"
+          /usr/bin/protoc --version
+
       - name: Install build dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install protobuf
+
+      - name: Set PROTOC (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "PROTOC=$(brew --prefix protobuf)/bin/protoc" >> "$GITHUB_ENV"
+          "$(brew --prefix protobuf)/bin/protoc" --version
 
       - name: Install build dependencies (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: choco install protoc -y
 
+      - name: Set PROTOC (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $protoc = (Get-Command protoc).Source
+          "PROTOC=$protoc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          & $protoc --version
+
       - name: Build (native)
         working-directory: daemon
         env:
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
+          PROTOC: ${{ env.PROTOC }}
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Rename binary
@@ -125,7 +146,6 @@ jobs:
                 'darwin-arm64':  { url: base + '/memix-daemon-darwin-arm64',      sha256: checksums['darwin-arm64'] },
                 'darwin-x64':    { url: base + '/memix-daemon-darwin-x64',        sha256: checksums['darwin-x64'] },
                 'linux-x64':     { url: base + '/memix-daemon-linux-x64',         sha256: checksums['linux-x64'] },
-                'linux-arm64':   { url: base + '/memix-daemon-linux-arm64',       sha256: checksums['linux-arm64'] },
                 'windows-x64':   { url: base + '/memix-daemon-windows-x64.exe',   sha256: checksums['windows-x64'] },
               }
             };
