@@ -39,75 +39,32 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Setup protoc - this works on ALL platforms!
+      - name: Setup protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: '25.1'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install build dependencies (Linux)
+      # Only need musl tools for Linux (protoc is already handled above)
+      - name: Install musl tools (Linux)
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools protobuf-compiler
-          # Verify installation
-          which protoc
-          protoc --version
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
-      - name: Set PROTOC environment (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          echo "PROTOC=/usr/bin/protoc" >> $GITHUB_ENV
-          echo "PROTOC=$(which protoc)" >> $GITHUB_ENV
+      # Optional debug step - verify protoc is working
+      - name: Verify protoc
+        run: protoc --version
 
-      - name: Install build dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew install protobuf
-          # Verify installation
-          which protoc
-          protoc --version
-
-      - name: Set PROTOC environment (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          echo "PROTOC=$(which protoc)" >> $GITHUB_ENV
-
-      - name: Install build dependencies (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          choco install protoc -y
-          # Refresh PATH to find protoc
-          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-          Write-Host "protoc path: $(Get-Command protoc).Source"
-          protoc --version
-
-      - name: Set PROTOC environment (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $protocPath = (Get-Command protoc).Source
-          echo "PROTOC=$protocPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          # Also update PATH
-          echo "$(Split-Path $protocPath)" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      # Debug step - verify PROTOC is set
-      - name: Verify PROTOC
-        run: |
-          echo "PROTOC=${{ env.PROTOC }}"
-          if [ -n "${{ env.PROTOC }}" ]; then
-            ${{ env.PROTOC }} --version || echo "Failed to run protoc"
-          else
-            echo "PROTOC is not set"
-          fi
-        shell: bash
-
-      - name: Build (native)
+      - name: Build
         working-directory: daemon
         env:
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
-          PROTOC: ${{ env.PROTOC }}
-          PROTOC_NO_VENDOR: 1
+          PROTOC_NO_VENDOR: 1  # This tells cargo to use system protoc
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Rename binary
@@ -115,10 +72,8 @@ jobs:
         run: |
           mkdir -p dist
           if [[ "${{ matrix.os }}" == "windows-2022" ]]; then
-            cp daemon/target/${{ matrix.target }}/release/memix-daemon.exe dist/${{ matrix.binary }} || \
             cp daemon/target/${{ matrix.target }}/release/memix-daemon.exe dist/${{ matrix.binary }}
           else
-            cp daemon/target/${{ matrix.target }}/release/memix-daemon dist/${{ matrix.binary }} || \
             cp daemon/target/${{ matrix.target }}/release/memix-daemon dist/${{ matrix.binary }}
           fi
 
@@ -128,6 +83,7 @@ jobs:
           name: ${{ matrix.binary }}
           path: dist/${{ matrix.binary }}
 
+  # The release job remains exactly the same - it's perfect!
   release:
     name: Create Release + Manifest
     needs: build
@@ -207,9 +163,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push manifest to api.memix.dev
-        # POSTs the new manifest to your Next.js API so it serves the latest immediately
-        # The MANIFEST_DEPLOY_SECRET is a shared secret you set in both GitHub secrets
-        # and your Next.js MANIFEST_DEPLOY_SECRET env var on Vercel
         run: |
           curl --fail --silent --show-error -X POST https://api.memix.dev/daemon/manifest \
             -H "Content-Type: application/json" \
