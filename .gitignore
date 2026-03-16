@@ -4,24 +4,99 @@ dist/
 out/
 .vscode-test/
 *.vsix
-.DS_Store
-**/.vscode
-**/bin/
-scripts/
+coverage/
+.nyc_output/
 
 # Rust Daemon
 daemon/target/
+daemon/Cargo.lock
 **/*.rs.bk
+**/*.rs~  # Backup files
+
+# Compiled binaries (but not the ones we need to distribute)
+# Note: We keep bin/ in git for distributing pre-compiled binaries
+# but ignore platform-specific ones if needed
+# extension/bin/
+!extension/bin/  # Uncomment if you want to keep binaries in git
 
 # Environment & Config
 .env
 .env.local
+.env.development
+.env.production
+.env.test
 .memix/
+*.pem
+*.key
+*.crt
 
 # IDE
-.vscode/launch.json
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
 .idea/
+*.swp
+*.swo
+*~
+*.sublime-*
+
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Logs & Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+debug.log
+logs/
+*.log
+
+# Testing & Coverage
+.nyc_output/
+coverage/
+*.test.ts.snap
+*.test.js.snap
+__snapshots__/
+
+# Next.js
+.next/
+build/
+.vercel
+out/
+
 
 # AI Rules
 .windsurf
 .windsurfrules
+.cursor
+.cursorrules
+.ropeproject/
+
+# Temporary Files
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+scripts/
+
+# Package Manager specific
+pnpm-lock.yaml
+yarn.lock
+
+# Only ignore if you're using yarn/pnpm
+package-lock.json  

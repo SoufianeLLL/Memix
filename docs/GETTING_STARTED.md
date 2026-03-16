@@ -4,6 +4,7 @@
 
 - **A Redis instance is required** — Memix stores your project brain in Redis.
 - VS Code `1.107+` (or compatible forks).
+- For the published daemon binaries, macOS `12+`, modern Linux x64, and Windows x64 are currently targeted.
 
 **No plugins or AI-side configuration required** — it works through the IDE's native rules/instructions mechanism.
 
@@ -60,6 +61,18 @@ Or click the Memix status bar item.
 ## Development: Run the daemon separately (fast Rust iteration)
 
 When developing the extension (F5), you can keep the daemon running as a standalone process so the extension does **not** spawn/stop it on every reload.
+
+If you build the Rust daemon from source, make sure these prerequisites are installed first:
+
+- Rust toolchain
+- `protoc` / Protocol Buffers compiler
+- Redis
+
+Examples:
+
+- macOS: `brew install protobuf`
+- Ubuntu/Debian: `sudo apt-get install protobuf-compiler`
+- Windows: install `protoc` before running the daemon build locally
 
 ### Option A: VS Code setting
 

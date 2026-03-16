@@ -13,6 +13,10 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - **Brain Hierarchy**: Added hierarchical context resolution API for layered/monorepo memory inheritance.
 - **Extension Surfacing**: Wired the new daemon capabilities into the extension client and advanced debug panel.
 
+### Build & Release
+- **Daemon release pipeline**: Updated daemon build requirements to install `protoc` on CI runners before compiling LanceDB-related dependencies.
+- **macOS compatibility target**: Daemon release artifacts are now built with macOS `12.0` as the deployment target.
+
 ### UX
 - **Prompt Pack Modal UX**: Prompt Pack is now summarized in-panel and opened in a modal for full inspection/copying.
 - **Observer DNA OTel Modal UX**: OTel export is now action-first instead of raw inline JSON.

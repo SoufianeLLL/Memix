@@ -19,53 +19,49 @@ jobs:
           - os: macos-14
             target: aarch64-apple-darwin
             binary: memix-daemon-darwin-arm64
-            use_cross: false
+            deployment_target: '12.0'
 
-          - os: macos-13
+          - os: macos-12
             target: x86_64-apple-darwin
             binary: memix-daemon-darwin-x64
-            use_cross: false
+            deployment_target: '12.0'
 
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-musl
             binary: memix-daemon-linux-x64
-            use_cross: false
-
-          - os: ubuntu-22.04
-            target: aarch64-unknown-linux-musl
-            binary: memix-daemon-linux-arm64
-            use_cross: true
+            deployment_target: ''
 
           - os: windows-2022
             target: x86_64-pc-windows-msvc
             binary: memix-daemon-windows-x64.exe
-            use_cross: false
+            deployment_target: ''
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cross (Linux ARM64 only)
-        if: matrix.use_cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+      - name: Install build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools protobuf-compiler
 
-      - name: Install musl tools (Linux only)
-        if: runner.os == 'Linux' && !matrix.use_cross
-        run: sudo apt-get install -y musl-tools
+      - name: Install build dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      - name: Install build dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install protoc -y
 
       - name: Build (native)
-        if: '!matrix.use_cross'
         working-directory: daemon
+        env:
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
         run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Build (cross)
-        if: matrix.use_cross
-        working-directory: daemon
-        run: cross build --release --target ${{ matrix.target }}
 
       - name: Rename binary
         shell: bash
@@ -89,7 +85,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
