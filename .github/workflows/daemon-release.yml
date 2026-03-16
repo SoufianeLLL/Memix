@@ -46,42 +46,68 @@ jobs:
 
       - name: Install build dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y musl-tools protobuf-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools protobuf-compiler
+          # Verify installation
+          which protoc
+          protoc --version
 
-      - name: Set PROTOC (Linux)
+      - name: Set PROTOC environment (Linux)
         if: runner.os == 'Linux'
         run: |
-          echo "PROTOC=/usr/bin/protoc" >> "$GITHUB_ENV"
-          /usr/bin/protoc --version
+          echo "PROTOC=/usr/bin/protoc" >> $GITHUB_ENV
+          echo "PROTOC=$(which protoc)" >> $GITHUB_ENV
 
       - name: Install build dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install protobuf
+        run: |
+          brew install protobuf
+          # Verify installation
+          which protoc
+          protoc --version
 
-      - name: Set PROTOC (macOS)
+      - name: Set PROTOC environment (macOS)
         if: runner.os == 'macOS'
         run: |
-          echo "PROTOC=$(brew --prefix protobuf)/bin/protoc" >> "$GITHUB_ENV"
-          "$(brew --prefix protobuf)/bin/protoc" --version
+          echo "PROTOC=$(which protoc)" >> $GITHUB_ENV
 
       - name: Install build dependencies (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: choco install protoc -y
+        run: |
+          choco install protoc -y
+          # Refresh PATH to find protoc
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+          Write-Host "protoc path: $(Get-Command protoc).Source"
+          protoc --version
 
-      - name: Set PROTOC (Windows)
+      - name: Set PROTOC environment (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $protoc = (Get-Command protoc).Source
-          "PROTOC=$protoc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          & $protoc --version
+          $protocPath = (Get-Command protoc).Source
+          echo "PROTOC=$protocPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          # Also update PATH
+          echo "$(Split-Path $protocPath)" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      # Debug step - verify PROTOC is set
+      - name: Verify PROTOC
+        run: |
+          echo "PROTOC=${{ env.PROTOC }}"
+          if [ -n "${{ env.PROTOC }}" ]; then
+            ${{ env.PROTOC }} --version || echo "Failed to run protoc"
+          else
+            echo "PROTOC is not set"
+          fi
+        shell: bash
 
       - name: Build (native)
         working-directory: daemon
         env:
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
           PROTOC: ${{ env.PROTOC }}
+          PROTOC_NO_VENDOR: 1
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Rename binary
@@ -89,8 +115,10 @@ jobs:
         run: |
           mkdir -p dist
           if [[ "${{ matrix.os }}" == "windows-2022" ]]; then
+            cp daemon/target/${{ matrix.target }}/release/memix-daemon.exe dist/${{ matrix.binary }} || \
             cp daemon/target/${{ matrix.target }}/release/memix-daemon.exe dist/${{ matrix.binary }}
           else
+            cp daemon/target/${{ matrix.target }}/release/memix-daemon dist/${{ matrix.binary }} || \
             cp daemon/target/${{ matrix.target }}/release/memix-daemon dist/${{ matrix.binary }}
           fi
 
