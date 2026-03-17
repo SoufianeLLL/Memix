@@ -69,7 +69,6 @@ jobs:
 
       - name: Build
         working-directory: daemon
-        timeout-minutes: 45
         env:
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
           PROTOC_NO_VENDOR: 1  # This tells cargo to use system protoc
