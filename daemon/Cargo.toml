@@ -53,7 +53,7 @@ tree-sitter-php = "0.23"
 dotenvy = "0.15.7"
 toml = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-fastembed = { version = "3", default-features = false, features = ["online", "ort-load-dynamic"] }
+fastembed = { version = "3", default-features = false, features = ["ort-load-dynamic"] }
 ort-sys = "=2.0.0-rc.4"
 mini-moka = "0.10.3"
 

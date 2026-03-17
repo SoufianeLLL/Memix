@@ -13,7 +13,13 @@ use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use fastembed::{InitOptionsUserDefined, TextEmbedding, TokenizerFiles, UserDefinedEmbeddingModel};
+
+static MODEL_CONFIG_JSON: &[u8] = include_bytes!("../../models/all-MiniLM-L6-v2/config.json");
+static MODEL_TOKENIZER_JSON: &[u8] = include_bytes!("../../models/all-MiniLM-L6-v2/tokenizer.json");
+static MODEL_TOKENIZER_CONFIG_JSON: &[u8] = include_bytes!("../../models/all-MiniLM-L6-v2/tokenizer_config.json");
+static MODEL_SPECIAL_TOKENS_JSON: &[u8] = include_bytes!("../../models/all-MiniLM-L6-v2/special_tokens_map.json");
+static MODEL_ONNX: &[u8] = include_bytes!("../../models/all-MiniLM-L6-v2/onnx/model.onnx");
 
 pub struct RedisStorage {
 	_client: redis::Client,
@@ -167,17 +173,28 @@ impl RedisStorage {
 		hasher.finish()
 	}
 
+	fn bundled_embedding_model() -> UserDefinedEmbeddingModel {
+		UserDefinedEmbeddingModel {
+			onnx_file: MODEL_ONNX.to_vec(),
+			tokenizer_files: TokenizerFiles {
+				tokenizer_file: MODEL_TOKENIZER_JSON.to_vec(),
+				config_file: MODEL_CONFIG_JSON.to_vec(),
+				special_tokens_map_file: MODEL_SPECIAL_TOKENS_JSON.to_vec(),
+				tokenizer_config_file: MODEL_TOKENIZER_CONFIG_JSON.to_vec(),
+			},
+		}
+	}
+
 	fn embedding_model() -> anyhow::Result<&'static TextEmbedding> {
 		static MODEL: OnceCell<TextEmbedding> = OnceCell::new();
 		if let Some(model) = MODEL.get() {
 			return Ok(model);
 		}
 
-		let model = TextEmbedding::try_new(InitOptions {
-			model_name: EmbeddingModel::AllMiniLML6V2,
-			show_download_progress: false,
-			..Default::default()
-		})
+		let model = TextEmbedding::try_new_from_user_defined(
+			Self::bundled_embedding_model(),
+			InitOptionsUserDefined::default(),
+		)
 		.map_err(|e| anyhow::anyhow!("fastembed init failed: {}", e))?;
 
 		let _ = MODEL.set(model);

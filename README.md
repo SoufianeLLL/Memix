@@ -28,6 +28,14 @@ While other tools wait for you to ask a question, Memix is already understanding
 - **A Redis instance is required** to store your project brain.
 - VS Code (or compatible forks: Antigravity, Cursor, Windsurf, Claude Code) with the Memix extension installed.
 
+## Local daemon development
+
+```bash
+cd daemon
+bash scripts/download_model.sh
+cargo build
+```
+
 
 <br/><br/>
 ## Features
@@ -131,7 +139,7 @@ A local Axum (Rust) daemon powers memory APIs, rules generation, observer snapsh
 Hybrid similarity now combines normalized vector similarity (cosine) with keyword overlap for stronger relevance.
 
 ### Local Embeddings with Safe Fallback
-`all-MiniLM-L6-v2` via `fastembed` powers semantic similarity locally. If ONNX Runtime is unavailable at runtime, the daemon safely falls back to deterministic dummy embeddings instead of failing requests.
+`all-MiniLM-L6-v2` is bundled into the daemon binary via `fastembed`, so semantic similarity works without a first-run model download. If ONNX Runtime is unavailable at runtime, the daemon safely falls back to deterministic dummy embeddings instead of failing requests.
 
 <br/>
 

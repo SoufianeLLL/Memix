@@ -92,7 +92,7 @@ temp/
 *.swp
 *.swo
 *~
-scripts/
+# scripts/
 
 # Package Manager specific
 pnpm-lock.yaml

@@ -39,6 +39,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Download embedding model
+        working-directory: daemon
+        shell: bash
+        run: bash scripts/download_model.sh
+
       # Setup protoc - this works on ALL platforms!
       - name: Setup protoc
         uses: arduino/setup-protoc@v3
