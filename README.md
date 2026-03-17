@@ -130,8 +130,8 @@ A local Axum (Rust) daemon powers memory APIs, rules generation, observer snapsh
 ### Smarter Similarity Search
 Hybrid similarity now combines normalized vector similarity (cosine) with keyword overlap for stronger relevance.
 
-### Optional Real Embeddings (feature-flagged)
-`all-MiniLM-L6-v2` via `fastembed` is available behind `real_embeddings` so default builds remain stable on environments without ONNX runtime support.
+### Local Embeddings with Safe Fallback
+`all-MiniLM-L6-v2` via `fastembed` powers semantic similarity locally. If ONNX Runtime is unavailable at runtime, the daemon safely falls back to deterministic dummy embeddings instead of failing requests.
 
 <br/>
 

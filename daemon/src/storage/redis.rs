@@ -4,39 +4,25 @@ use crate::storage::{RedisStats, StorageBackend, TeamSyncReport};
 use crate::sync::team::TeamManager;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use once_cell::sync::OnceCell;
 use redis::AsyncCommands;
-use lancedb::connection::Connection;
-use lancedb::connect;
-use lancedb::query::{ExecutableQuery, QueryBase};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use tokio::fs;
-use arrow_schema::{Field, Schema, DataType};
-use arrow_array::{Array, StringArray, RecordBatch, RecordBatchIterator};
-use arrow_array::builder::{FixedSizeListBuilder, Float32Builder};
 use mini_moka::sync::Cache;
-use futures::TryStreamExt;
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-#[cfg(feature = "real_embeddings")]
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 
 pub struct RedisStorage {
 	_client: redis::Client,
-	_lance_conn: Connection,
-	arrow_schema: Arc<Schema>,
 	data_dir: PathBuf,
 	embedding_cache: Cache<u64, Vec<f32>>,
 }
 
 impl RedisStorage {
 	const MAX_ENTRIES_PER_PROJECT: u64 = 1000;
-
-	fn lancedb_string_literal(value: &str) -> String {
-		value.replace('\\', "\\\\").replace('\'', "\\'")
-	}
 
 	async fn atomic_write(path: &Path, content: &str) -> Result<()> {
 		let tmp = path.with_extension("json.tmp");
@@ -162,44 +148,15 @@ impl RedisStorage {
 		}
 		
 		if !data_dir.exists() {
-        	tracing::info!("Creating data directory: {:?}", data_dir);
+         	tracing::info!("Creating data directory: {:?}", data_dir);
 			fs::create_dir_all(&data_dir).await.context("Failed to create data directory")?;
 		}
 
-		let lance_path = data_dir.join("lancedb");
-    	tracing::info!("Initializing LanceDB at: {:?}", lance_path);
-
-		// Check if parent dir exists and is writable
-		if let Some(parent) = lance_path.parent() {
-			tracing::info!("Parent dir: {:?}, exists: {}", parent, parent.exists());
-			tracing::info!("Parent dir writable: {}", Self::is_writable(parent).await);
-		}
-
-		match connect(lance_path.to_str().unwrap()).execute().await {
-			Ok(conn) => {
-				tracing::info!("LanceDB connected successfully");
-				let _lance_conn = conn;
-				
-				tracing::info!("Creating arrow schema");
-				let arrow_schema = Arc::new(Schema::new(vec![
-					Field::new("id", DataType::Utf8, false),
-					Field::new("project_id", DataType::Utf8, false),
-					Field::new("vector", DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), 384), false),
-				]));
-				
-				Ok(Self {
-					_client,
-					_lance_conn,
-					arrow_schema,
-					data_dir,
-					embedding_cache: Cache::builder().max_capacity(10_000).build(),
-				})
-			},
-			Err(e) => {
-				tracing::error!("LanceDB connection failed: {:?}", e);
-				Err(anyhow::anyhow!("LanceDB initialization failed: {}", e))
-			}
-		}
+		Ok(Self {
+			_client,
+			data_dir,
+			embedding_cache: Cache::builder().max_capacity(10_000).build(),
+		})
 	}
 
 	fn generate_dummy_embedding(&self, text: &str) -> Vec<f32> {
@@ -217,16 +174,25 @@ impl RedisStorage {
 		hasher.finish()
 	}
 
-	#[cfg(feature = "real_embeddings")]
 	fn embedding_model() -> anyhow::Result<&'static TextEmbedding> {
-		static MODEL: std::sync::OnceLock<TextEmbedding> = std::sync::OnceLock::new();
-		MODEL.get_or_try_init(|| {
-			TextEmbedding::try_new(InitOptions::new(EmbeddingModel::AllMiniLML6V2))
-				.map_err(|e| anyhow::anyhow!("fastembed init failed: {}", e))
+		static MODEL: OnceCell<TextEmbedding> = OnceCell::new();
+		if let Some(model) = MODEL.get() {
+			return Ok(model);
+		}
+
+		let model = TextEmbedding::try_new(InitOptions {
+			model_name: EmbeddingModel::AllMiniLML6V2,
+			show_download_progress: false,
+			..Default::default()
 		})
+		.map_err(|e| anyhow::anyhow!("fastembed init failed: {}", e))?;
+
+		let _ = MODEL.set(model);
+		MODEL
+			.get()
+			.ok_or_else(|| anyhow::anyhow!("fastembed model initialization did not persist"))
 	}
 
-	#[cfg(feature = "real_embeddings")]
 	async fn embed_text_real(text: String) -> anyhow::Result<Vec<f32>> {
 		let handle = tokio::task::spawn_blocking(move || {
 			let model = Self::embedding_model()?;
@@ -246,19 +212,16 @@ impl RedisStorage {
 			return hit;
 		}
 
-		#[cfg(feature = "real_embeddings")]
-		{
-			match Self::embed_text_real(text.to_string()).await {
-				Ok(v) if v.len() == 384 => {
-					self.embedding_cache.insert(key, v.clone());
-					return v;
-				}
-				Ok(v) => {
-					tracing::warn!("Real embedding returned dim={} (expected 384); falling back", v.len());
-				}
-				Err(e) => {
-					tracing::error!("Real embedding failed; falling back to dummy: {}", e);
-				}
+		match Self::embed_text_real(text.to_string()).await {
+			Ok(v) if v.len() == 384 => {
+				self.embedding_cache.insert(key, v.clone());
+				return v;
+			}
+			Ok(v) => {
+				tracing::warn!("Real embedding returned dim={} (expected 384); falling back", v.len());
+			}
+			Err(e) => {
+				tracing::error!("Real embedding failed; falling back to dummy: {}", e);
 			}
 		}
 		let fallback = self.generate_dummy_embedding(text);
@@ -512,36 +475,6 @@ impl StorageBackend for RedisStorage {
 			RedisStorage::mirror_entry_to_json_at(mirror_data_dir, mirror_entry).await;
 		});
 
-		let vector = self.embed_text(&entry.content).await;
-		let id_array = Arc::new(StringArray::from(vec![entry.id.clone()])) as Arc<dyn arrow_array::Array>;
-		let project_id_array = Arc::new(StringArray::from(vec![entry.project_id.clone()])) as Arc<dyn arrow_array::Array>;
-		
-		let mut builder = FixedSizeListBuilder::new(Float32Builder::new(), 384);
-		for &v in &vector {
-			builder.values().append_value(v);
-		}
-		builder.append(true);
-		let vector_array = Arc::new(builder.finish()) as Arc<dyn arrow_array::Array>;
-
-		if let Ok(batch) = RecordBatch::try_new(
-			self.arrow_schema.clone(),
-			vec![id_array, project_id_array, vector_array],
-		) {
-			if let Ok(table) = match self._lance_conn.open_table("memories").execute().await {
-				Ok(t) => Ok(t),
-				Err(lancedb::Error::TableNotFound { .. }) => {
-					let t: lancedb::Table = self._lance_conn.create_empty_table("memories", self.arrow_schema.clone()).execute().await?;
-					Ok(t)
-				},
-				Err(e) => Err(e),
-			} {
-				let table: lancedb::Table = table;
-				if let Err(e) = table.add(RecordBatchIterator::new(vec![Ok(batch)].into_iter(), self.arrow_schema.clone())).execute().await {
-					tracing::error!("Failed to insert memory vector into LanceDB: {}", e);
-				}
-			}
-		}
-
 		Ok(())
 	}
 
@@ -553,12 +486,6 @@ impl StorageBackend for RedisStorage {
 		let mut conn = self._client.get_multiplexed_async_connection().await?;
 		let _: () = conn.hdel(project_id, entry_id).await?;
 		self.delete_entry_json_at(entry_id).await;
-			
-		if let Ok(table) = self._lance_conn.open_table("memories").execute().await {
-			let table: lancedb::Table = table;
-			let safe_id = Self::lancedb_string_literal(entry_id);
-			let _ = table.delete(format!("id = '{}'", safe_id).as_str()).await;
-		}
 		Ok(())
 	}
 
@@ -566,12 +493,6 @@ impl StorageBackend for RedisStorage {
 		let mut conn = self._client.get_multiplexed_async_connection().await?;
 		let _: () = conn.del(project_id).await?;
 		self.purge_brain_dir().await;
-
-		if let Ok(table) = self._lance_conn.open_table("memories").execute().await {
-			let table: lancedb::Table = table;
-			let safe_project_id = Self::lancedb_string_literal(project_id);
-			let _ = table.delete(format!("project_id = '{}'", safe_project_id).as_str()).await;
-		}
 		Ok(())
 	}
 
@@ -583,58 +504,6 @@ impl StorageBackend for RedisStorage {
 
 		let query_embedding = self.embed_text(query).await;
 
-		if let Ok(table) = self._lance_conn.open_table("memories").execute().await {
-			let safe_project_id = Self::lancedb_string_literal(project_id);
-			let filter = format!("project_id = '{}'", safe_project_id);
-			let search = table
-				.query()
-				.only_if(filter)
-				.nearest_to(query_embedding.as_slice())
-				.map(|q| q.column("vector").limit(20));
-
-			if let Ok(vector_query) = search {
-				if let Ok(stream) = vector_query.execute().await {
-					let batches: Result<Vec<RecordBatch>, lancedb::Error> = stream.try_collect().await;
-					if let Ok(batches) = batches {
-						let mut ordered_ids: Vec<String> = Vec::new();
-						for batch in batches {
-							let Ok(id_idx) = batch.schema().index_of("id") else { continue; };
-							let Some(id_col) = batch.column(id_idx).as_any().downcast_ref::<StringArray>() else { continue; };
-							for i in 0..id_col.len() {
-								if id_col.is_null(i) {
-									continue;
-								}
-								ordered_ids.push(id_col.value(i).to_string());
-							}
-						}
-
-						if !ordered_ids.is_empty() {
-							let by_id: HashMap<String, MemoryEntry> = all_entries
-								.iter()
-								.cloned()
-								.map(|e| (e.id.clone(), e))
-								.collect();
-
-							let mut results: Vec<MemoryEntry> = Vec::new();
-							for id in ordered_ids {
-								if let Some(entry) = by_id.get(&id) {
-									results.push(entry.clone());
-									if results.len() >= 10 {
-										break;
-									}
-								}
-							}
-
-							if !results.is_empty() {
-								return Ok(results);
-							}
-						}
-					}
-				}
-			}
-		}
-
-		// Fallback: brute-force hybrid score when vector query path has no usable results.
 		let mut scored: Vec<(MemoryEntry, f32)> = Vec::with_capacity(all_entries.len());
 		for e in all_entries {
 			let entry_embedding = self.embed_text(&e.content).await;

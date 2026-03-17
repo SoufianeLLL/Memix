@@ -14,7 +14,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - **Extension Surfacing**: Wired the new daemon capabilities into the extension client and advanced debug panel.
 
 ### Build & Release
-- **Daemon release pipeline**: Updated daemon build requirements to install `protoc` on CI runners before compiling LanceDB-related dependencies.
+- **Daemon release pipeline**: Updated daemon build requirements to install `protoc` on CI runners before compiling the Rust daemon and embedding stack.
 - **macOS compatibility target**: Daemon release artifacts are now built with macOS `12.0` as the deployment target.
 
 ### UX
@@ -44,7 +44,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   - Run Brain Migrations
 
 ### Reliability & Testing
-- Added ignored integration-style stress test for Redis/LanceDB/JSON mirror export-import roundtrip under load.
+- Added ignored integration-style stress test for Redis/JSON mirror export-import roundtrip under load.
 
 ## [1.0.0-beta.3] - 2026-03-06 (Autonomous Pair Programmer + Multi-Language)
 ### Features
@@ -65,7 +65,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ### Features
 - **Core Engine**: Fully rebuilt intelligence layer operating autonomously in a local Rust Daemon bridging via UDS sockets.
 - **Predictive Context & Intent Detection**: Observes edit distances within AST trees using `tree-sitter` and preemptively loads relevant Vector chunks.
-- **Offline LanceDB + FastEmbed**: Ships standard with completely offline 384-dimensional Vector Embedding mapping to Cosine Similarity queries natively.
+- **Offline Local Embeddings**: Ships with local 384-dimensional vector embedding support and native cosine-similarity-based retrieval.
 - **Full-Text Brain Search**: Integrates Tantivy for indexing and traversing deep semantic history allowing massive brain volumes without contextual token-wasting.
 - **Negative Memories & Contradictions**: Memory models now support complex graph resolutions mapping legacy logic over directly to newer architectures dynamically.
 - **Secure Architecture Sync**: Supports standard `AES-256-GCM` encryption inside Redis, completely mitigating read risks on shared environments, mapped through robust `CRDT` merging algorithms.

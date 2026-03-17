@@ -24,7 +24,7 @@
 
 - ✅ **Lightning-Fast Native Core**: Completly rebuilt Memix's backend memory engine using native compiled Rust.
 - ✅ **Autonomous Codebase Observation**: Watch changes dynamically via AST `tree-sitter` integration.
-- ✅ **Offline Semantic Intelligence**: Embedded LanceDB for vector memory indexes, keeping all embeddings local and private.
+- ✅ **Offline Semantic Intelligence**: Local embedding-backed semantic retrieval keeps memory search private and on-device.
 - ✅ **Code DNA & Dependency Mapping**: O(1) Adjacency matrices and native cyclomatic complexity analysis based on edit-distance.
 - ✅ **Advanced Predictor & Caching**: Pre-loaded memory context via native `DashMap` concurrency caching.
 - ✅ **Ironclad Security & Team Sync**: CRDTs (Conflict-free Replicated Data Types) for team context sync and `AES-256-GCM` key resting storage.
@@ -75,7 +75,7 @@ Planned scope:
 ### Phase 1 Hardening Completion
 - PID lock hardening + stale lock recovery (single-daemon safety).
 - Full Brain CRUD + purge guardrails.
-- End-to-end vector retrieval path validation and tuning for LanceDB query flow.
+- End-to-end vector retrieval path validation and tuning for the local hybrid similarity flow.
 
 ### The "Web LLM Bridge" (Export Brain for AI)
 A magical feature for Claude and ChatGPT web users. Export your entire Memix Brain and core project context into a single, highly compressed structure. Just drag and drop it into any web LLM, and it instantly possesses 100% of your complex, local IDE context.
