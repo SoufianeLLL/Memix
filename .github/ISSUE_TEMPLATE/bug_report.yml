@@ -1,0 +1,70 @@
+name: Bug Report
+description: Create a report to help us improve Memix
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please check if a similar issue already exists.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened? Please describe the issue clearly.
+      placeholder: "When I do X, I expect Y to happen, but instead Z happens."
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this issue?
+      placeholder: |
+        1. Open VS Code
+        2. Run command 'Memix: ...'
+        3. See error
+    validations:
+      required: true
+
+  - type: input
+    id: extension-version
+    attributes:
+      label: Memix Extension Version
+      description: Which version of the extension are you using? (e.g. 1.0.0-beta.5)
+      placeholder: 1.0.0-beta.5
+    validations:
+      required: true
+
+  - type: dropdown
+    id: ide
+    attributes:
+      label: Editor / IDE
+      description: Which editor are you using?
+      options:
+        - VS Code
+        - Cursor
+        - Windsurf
+        - Antigravity
+        - Other (please specify below)
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      description: Which OS are you on?
+      placeholder: macOS 14.2 / Windows 11 / Ubuntu 22.04
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Please paste any relevant logs from the **Output > Memix** channel.
+      render: text
+    validations:
+      required: false
