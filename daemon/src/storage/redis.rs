@@ -35,13 +35,6 @@ impl RedisStorage {
 		Ok(())
 	}
 
-	async fn is_writable(path: &Path) -> bool {  // ← Accepts any Path
-		tokio::fs::metadata(path)
-			.await
-			.map(|m| !m.permissions().readonly())
-			.unwrap_or(false)
-	}
-
 	fn safe_entry_filename(entry_id: &str) -> Option<String> {
 		let file_name = Path::new(entry_id).file_name()?.to_string_lossy().to_string();
 		if file_name.is_empty() {
