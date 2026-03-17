@@ -16,29 +16,33 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
-            target: aarch64-apple-darwin
-            binary: memix-daemon-darwin-arm64
-            deployment_target: '12.0'
-            toolchain: stable
+          # - os: macos-14
+          #   target: aarch64-apple-darwin
+          #   binary: memix-daemon-darwin-arm64
+          #   deployment_target: '12.0'
+          #   toolchain: stable
+          #   build_std: false
 
           - os: macos-14 # cross-compile Intel from ARM runner
             target: x86_64-apple-darwin
             binary: memix-daemon-darwin-x64
             deployment_target: '12.0'
-            toolchain: '1.77'
+            toolchain: nightly
+            build_std: true
 
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-musl
-            binary: memix-daemon-linux-x64
-            deployment_target: ''
-            toolchain: stable
+          # - os: ubuntu-22.04
+          #   target: x86_64-unknown-linux-musl
+          #   binary: memix-daemon-linux-x64
+          #   deployment_target: ''
+          #   toolchain: stable
+          #   build_std: false
 
-          - os: windows-2022
-            target: x86_64-pc-windows-msvc
-            binary: memix-daemon-windows-x64.exe
-            deployment_target: ''
-            toolchain: stable
+          # - os: windows-2022
+          #   target: x86_64-pc-windows-msvc
+          #   binary: memix-daemon-windows-x64.exe
+          #   deployment_target: ''
+          #   toolchain: stable
+          #   build_std: false
 
     steps:
       - uses: actions/checkout@v6
@@ -55,9 +59,11 @@ jobs:
         with:
           toolchain: ${{ matrix.toolchain }}
           targets: ${{ matrix.target }}
+          components: ${{ matrix.build_std == true && 'rust-src' || '' }}
 
       # Rust cache after Install Rust step
       - name: Cache Rust dependencies
+        if: matrix.toolchain == 'stable'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: daemon
@@ -77,7 +83,12 @@ jobs:
         env:
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
           PROTOC_NO_VENDOR: 1  # This tells cargo to use system protoc
-        run: cargo build --release --target ${{ matrix.target }}
+        run: |
+          if [ "${{ matrix.build_std }}" = "true" ]; then
+            cargo build --release --target ${{ matrix.target }} -Z build-std=std,panic_abort
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
 
       - name: Rename binary
         shell: bash
