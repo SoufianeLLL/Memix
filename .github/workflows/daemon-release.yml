@@ -117,8 +117,8 @@ jobs:
         id: checksums
         run: |
           cd dist
-          for f in memix-daemon-*; do
-            sha256sum "$f" >> ../checksums.txt
+          find . -maxdepth 2 -name 'memix-daemon-*' -type f | while read f; do
+            sha256sum "$f" | sed 's|\./[^/]*/||' >> ../checksums.txt
           done
           cat ../checksums.txt
 
