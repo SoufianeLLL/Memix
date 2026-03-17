@@ -26,17 +26,19 @@ jobs:
             target: x86_64-apple-darwin
             binary: memix-daemon-darwin-x64
             deployment_target: '12.0'
-            rustflags: '-C target-feature=-avx512f,-avx512bw,-avx512cd,-avx512dq,-avx512vl'
+            rustflags: '-C target-cpu=x86-64'
 
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-musl
             binary: memix-daemon-linux-x64
             deployment_target: ''
+            rustflags: '-C target-cpu=x86-64'
 
           - os: windows-2022
             target: x86_64-pc-windows-msvc
             binary: memix-daemon-windows-x64.exe
             deployment_target: ''
+            rustflags: '-C target-cpu=x86-64'
 
     steps:
       - uses: actions/checkout@v6
