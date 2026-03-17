@@ -2,6 +2,8 @@ import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
 
+const IS_WINDOWS = process.platform === 'win32';
+const DAEMON_TCP_PORT = parseInt(process.env.MEMIX_PORT || '3456', 10);
 let SOCKET_PATH = path.join(os.homedir(), '.memix', 'daemon.sock');
 const API_PREFIX = '/api/v1';
 
@@ -22,6 +24,15 @@ function getRequestOptions(method: string, requestPath: string): http.RequestOpt
 			method
 		};
 	}
+	// Windows: TCP fallback since Unix sockets aren't available
+    if (IS_WINDOWS) {
+        return {
+            hostname: '127.0.0.1',
+            port: DAEMON_TCP_PORT,
+            path: requestPath,
+            method,
+        };
+    }
 	return {
 		socketPath: SOCKET_PATH,
 		path: requestPath,

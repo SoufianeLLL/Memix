@@ -19,12 +19,12 @@ jobs:
           - os: macos-14
             target: aarch64-apple-darwin
             binary: memix-daemon-darwin-arm64
-            deployment_target: '12.0'
+            deployment_target: '13.0'
 
-          - os: macos-12
+          - os: macos-13
             target: x86_64-apple-darwin
             binary: memix-daemon-darwin-x64
-            deployment_target: '12.0'
+            deployment_target: '13.0'
 
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-musl
@@ -37,7 +37,7 @@ jobs:
             deployment_target: ''
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       # Setup protoc - this works on ALL platforms!
       - name: Setup protoc
@@ -51,6 +51,13 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # Rust cache after Install Rust step
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: daemon
+          key: ${{ matrix.target }}
+
       # Only need musl tools for Linux (protoc is already handled above)
       - name: Install musl tools (Linux)
         if: runner.os == 'Linux'
@@ -62,6 +69,7 @@ jobs:
 
       - name: Build
         working-directory: daemon
+        timeout-minutes: 45
         env:
           MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
           PROTOC_NO_VENDOR: 1  # This tells cargo to use system protoc
@@ -78,7 +86,7 @@ jobs:
           fi
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.binary }}
           path: dist/${{ matrix.binary }}
@@ -90,7 +98,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4

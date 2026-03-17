@@ -756,31 +756,34 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // 4. Bind and serve HTTP over Unix Domain Sockets
+    #[cfg(unix)]
     let home_dir = dirs::home_dir().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+    #[cfg(unix)]
     let socket_path = home_dir.join(".memix").join("daemon.sock");
+    #[cfg(unix)]
     if let Some(parent) = socket_path.parent() {
         if !parent.exists() {
             fs::create_dir_all(parent)?;
         }
     }
-    
+    #[cfg(unix)]
     if socket_path.exists() {
         fs::remove_file(&socket_path)?;
     }
-
+    #[cfg(unix)]
     let listener = tokio::net::UnixListener::bind(&socket_path)?;
-    
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))?;
     }
-
+    #[cfg(unix)]
     tracing::info!("Daemon listening on Unix Socket at {:?}", socket_path);
-
-    // Hyper-util accept loop since Axum 0.7's `serve` convenience method only takes TcpListener
+    #[cfg(unix)]
     use hyper_util::rt::{TokioExecutor, TokioIo};
+    #[cfg(unix)]
     use hyper_util::server::conn::auto::Builder;
+    #[cfg(unix)]
     use hyper_util::service::TowerToHyperService;
 
     // 5. Spawn the AST Background Observer
@@ -1354,6 +1357,7 @@ async fn main() -> anyhow::Result<()> {
 		}
 	});
 
+	#[cfg(unix)]
 	loop {
 		let (socket, _addr) = listener.accept().await?;
 		let app = app.clone();
@@ -1368,4 +1372,7 @@ async fn main() -> anyhow::Result<()> {
 			}
 		});
 	}
+
+	#[cfg(not(unix))]
+	std::future::pending::<()>().await;
 }
