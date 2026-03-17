@@ -19,12 +19,12 @@ jobs:
           - os: macos-14
             target: aarch64-apple-darwin
             binary: memix-daemon-darwin-arm64
-            deployment_target: '13.0'
+            deployment_target: '12.0'
 
-          - os: macos-13
+          - os: macos-14 # cross-compile Intel from ARM runner
             target: x86_64-apple-darwin
             binary: memix-daemon-darwin-x64
-            deployment_target: '13.0'
+            deployment_target: '12.0'
 
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-musl

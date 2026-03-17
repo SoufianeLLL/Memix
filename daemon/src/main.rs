@@ -1374,5 +1374,9 @@ async fn main() -> anyhow::Result<()> {
 	}
 
 	#[cfg(not(unix))]
-	std::future::pending::<()>().await;
+	{
+		std::future::pending::<()>().await;
+		#[allow(unreachable_code)]
+		Ok(())
+	}
 }
