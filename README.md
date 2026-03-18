@@ -31,7 +31,6 @@ While other tools wait for you to ask a question, Memix is already understanding
 ## Local daemon development
 
 ```bash
-cd daemon
 bash scripts/download_model.sh
 cargo build
 ```

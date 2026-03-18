@@ -181,6 +181,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				description: 'The daemon is installed and ready.',
 				version: runtime.version,
 			});
+			DaemonRuntimeManager.startBackgroundUpdateCheck(context, context.extension.packageJSON.version);
 		} catch (e: any) {
 			daemonOutputChannel.show(true);
 			setDaemonReadinessState({
@@ -763,5 +764,6 @@ export function deactivate() {
 	const externalDaemon = config.get<boolean>('dev.externalDaemon') === true;
 	if (!externalDaemon) {
 		DaemonManager.stop();
+		DaemonRuntimeManager.stopBackgroundUpdateCheck();
 	}
 }

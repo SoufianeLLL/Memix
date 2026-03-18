@@ -702,11 +702,71 @@ async fn main() -> anyhow::Result<()> {
         daemon_config.clone(),
 	);
 
+	// ─── BIND UNIX SOCKET IMMEDIATELY after router is ready ───────────────────
+	// Do this BEFORE migrations and heavy init so the health check can pass
+	// as soon as the process is alive, not after all startup work completes.
+	#[cfg(unix)]
+	let socket_path = {
+		let home_dir = dirs::home_dir()
+			.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+		let p = home_dir.join(".memix").join("daemon.sock");
+		if let Some(parent) = p.parent() {
+			if !parent.exists() { fs::create_dir_all(parent)?; }
+		}
+		if p.exists() { fs::remove_file(&p)?; }
+		p
+	};
+
+	#[cfg(unix)]
+	let unix_listener = tokio::net::UnixListener::bind(&socket_path)?;
+
+	#[cfg(unix)]
 	{
-		let mut runtime = agent_runtime.lock().await;
+		use std::os::unix::fs::PermissionsExt;
+		fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))?;
+		tracing::info!("Daemon listening on Unix Socket at {:?}", socket_path);
+	}
+
+	// ─── Run the Unix accept loop in a spawned task ────────────────────────────
+	// This means the health check can succeed immediately while the rest of
+	// startup (migrations, session agents, watcher) continues below.
+	#[cfg(unix)]
+	{
+		use hyper_util::rt::{TokioExecutor, TokioIo};
+		use hyper_util::server::conn::auto::Builder;
+		use hyper_util::service::TowerToHyperService;
+		let unix_app = app.clone();
+		tokio::spawn(async move {
+			loop {
+				match unix_listener.accept().await {
+					Ok((socket, _)) => {
+						let svc = unix_app.clone();
+						tokio::spawn(async move {
+							let io = TokioIo::new(socket);
+							if let Err(e) = Builder::new(TokioExecutor::new())
+								.serve_connection(io, TowerToHyperService::new(svc))
+								.await
+							{
+								tracing::error!("UDS connection error: {}", e);
+							}
+						});
+					}
+					Err(e) => tracing::error!("Unix accept error: {}", e),
+				}
+			}
+		});
+	}
+
+	let agent_runtime_clone = agent_runtime.clone();
+	let storage_backend_clone = storage_backend.clone();
+	let project_id_clone = project_id_for_events.clone();
+	let workspace_root_clone = agent_workspace_root.to_string_lossy().to_string();
+
+	tokio::spawn(async move {
+		let mut runtime = agent_runtime_clone.lock().await;
 		for report in runtime.process_session_start(&SessionStartContext {
-			project_id: project_id_for_events.clone(),
-			workspace_root: agent_workspace_root.to_string_lossy().to_string(),
+			project_id: project_id_clone.clone(),
+			workspace_root: workspace_root_clone,
 		}) {
 			let kind = if report.severity >= crate::agents::AgentSeverity::Warning {
 				MemoryKind::Warning
@@ -715,7 +775,7 @@ async fn main() -> anyhow::Result<()> {
 			};
 			let entry = MemoryEntry {
 				id: report.entry_id.clone(),
-				project_id: project_id_for_events.clone(),
+				project_id: project_id_clone.clone(),
 				kind,
 				content: serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string()),
 				tags: vec!["agent".to_string(), report.agent_name.to_lowercase()],
@@ -730,12 +790,12 @@ async fn main() -> anyhow::Result<()> {
 				access_count: 0,
 				last_accessed_at: None,
 			};
-			let _ = storage_backend.upsert_entry(&project_id_for_events, entry).await;
-			if let Some(output_entry) = build_agent_output_entry(&project_id_for_events, &report) {
-				let _ = storage_backend.upsert_entry(&project_id_for_events, output_entry).await;
+			let _ = storage_backend_clone.upsert_entry(&project_id_clone, entry).await;
+			if let Some(output_entry) = build_agent_output_entry(&project_id_clone, &report) {
+				let _ = storage_backend_clone.upsert_entry(&project_id_clone, output_entry).await;
 			}
 		}
-	}
+	});
 
     // 3.5 Bind and serve HTTP over localhost TCP as well (useful for dev + multi-IDE compatibility)
     let port = app_config.port.unwrap_or(3456);
@@ -754,37 +814,6 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     });
-
-    // 4. Bind and serve HTTP over Unix Domain Sockets
-    #[cfg(unix)]
-    let home_dir = dirs::home_dir().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
-    #[cfg(unix)]
-    let socket_path = home_dir.join(".memix").join("daemon.sock");
-    #[cfg(unix)]
-    if let Some(parent) = socket_path.parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent)?;
-        }
-    }
-    #[cfg(unix)]
-    if socket_path.exists() {
-        fs::remove_file(&socket_path)?;
-    }
-    #[cfg(unix)]
-    let listener = tokio::net::UnixListener::bind(&socket_path)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))?;
-    }
-    #[cfg(unix)]
-    tracing::info!("Daemon listening on Unix Socket at {:?}", socket_path);
-    #[cfg(unix)]
-    use hyper_util::rt::{TokioExecutor, TokioIo};
-    #[cfg(unix)]
-    use hyper_util::server::conn::auto::Builder;
-    #[cfg(unix)]
-    use hyper_util::service::TowerToHyperService;
 
     // 5. Spawn the AST Background Observer
     let (tx, mut rx) = tokio::sync::mpsc::channel(100);
@@ -1357,26 +1386,7 @@ async fn main() -> anyhow::Result<()> {
 		}
 	});
 
-	#[cfg(unix)]
-	loop {
-		let (socket, _addr) = listener.accept().await?;
-		let app = app.clone();
-		tokio::spawn(async move {
-			let io = TokioIo::new(socket);
-			let hyper_service = TowerToHyperService::new(app);
-			if let Err(e) = Builder::new(TokioExecutor::new())
-				.serve_connection(io, hyper_service)
-				.await
-			{
-				tracing::error!("Server error on UDS connection: {}", e);
-			}
-		});
-	}
-
-	#[cfg(not(unix))]
-	{
-		std::future::pending::<()>().await;
-		#[allow(unreachable_code)]
-		Ok(())
-	}
+	std::future::pending::<()>().await;
+	#[allow(unreachable_code)]
+	Ok(())
 }

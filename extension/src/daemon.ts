@@ -164,7 +164,7 @@ export class DaemonManager {
     private static waitForHealthCheck(): Promise<{ status: string, message?: string }> {
         return new Promise((resolve, reject) => {
             let retries = 0;
-            const maxRetries = 10;
+            const maxRetries = 30;
             const healthPath = '/health';
 
             const requestOnce = () => {

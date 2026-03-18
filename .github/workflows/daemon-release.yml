@@ -4,13 +4,29 @@ on:
   push:
     tags:
       - 'daemon-v*'
+  workflow_dispatch:
+    inputs:
+      min_extension_version:
+        description: 'Minimum extension version required for this daemon (e.g. 1.0.0-beta.5). Leave empty if no breaking changes.'
+        required: false
+        default: ''
+      platform:
+        description: 'Platform to build (leave empty for all)'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - windows
+          - linux
+          - macos-arm64
+          - macos-x64
 
 permissions:
   contents: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  MIN_EXTENSION_VERSION: ${{ vars.MIN_EXTENSION_VERSION }}
 
 jobs:
   build:
@@ -44,7 +60,6 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Download embedding model
-        working-directory: daemon
         shell: bash
         run: bash scripts/download_model.sh
 
@@ -157,13 +172,13 @@ jobs:
                 const hash = parts[0];
                 // The filename might have spaces, so join the rest
                 const file = parts.slice(1).join(' ');
-                console.log(`Found: hash='\${hash}', file='\${file}'`);
+                console.log(\`Found: hash='\${hash}', file='\${file}'\`);
                 
                 // Extract platform from filename (remove 'memix-daemon-' prefix)
                 let platform = file.replace('memix-daemon-', '');
                 // Store with the exact platform name
                 checksums[platform] = hash;
-                console.log(`  -> Stored checksums['\${platform}'] = \${hash}`);
+                console.log(\`  -> Stored checksums['\${platform}'] = \${hash}\`);
               }
             }
             
@@ -171,7 +186,8 @@ jobs:
             const manifest = {
               version: process.env.VERSION,
               released_at: new Date().toISOString(),
-              minExtensionVersion: process.env.MIN_EXTENSION_VERSION || undefined,
+              // Only include minExtensionVersion if explicitly set (workflow_dispatch or repo var)
+              ...(process.env.MIN_EXTENSION_VERSION ? { minExtensionVersion: process.env.MIN_EXTENSION_VERSION } : {}),
               binaries: {
                 'darwin-arm64':  { url: base + '/memix-daemon-darwin-arm64',      sha256: checksums['darwin-arm64'] || checksums['darwin-arm64.exe'] || '' },
                 'darwin-x64':    { url: base + '/memix-daemon-darwin-x64',        sha256: checksums['darwin-x64'] || checksums['darwin-x64.exe'] || '' },
@@ -205,6 +221,8 @@ jobs:
           VERSION: ${{ github.ref_name }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # workflow_dispatch input takes priority; fall back to the repo-level variable
+          MIN_EXTENSION_VERSION: ${{ github.event.inputs.min_extension_version || vars.MIN_EXTENSION_VERSION || '' }}
 
       - name: Normalize manifest version
         run: |
@@ -239,6 +257,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push manifest to api.memix.dev
+        continue-on-error: true  # non-fatal: don't block the release if the API is temporarily down
         run: |
           RESPONSE_FILE=$(mktemp)
           HTTP_CODE=$(curl --silent --show-error \
