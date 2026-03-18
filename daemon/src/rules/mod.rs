@@ -567,17 +567,52 @@ pub struct RulesGenerationResult {
 impl RulesGenerationResult {
     pub fn write_files(&self) -> std::io::Result<()> {
         use std::fs;
+        use std::path::{Path, PathBuf};
         
-        let rules_dir = std::path::Path::new(&self.workspace_root).join(&self.config.rules_dir);
+        // Canonicalize workspace root to ensure clean base path
+        let workspace_root = Path::new(&self.workspace_root).canonicalize()?;
         
+        if self.config.rules_dir.contains("..") {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "rules directory cannot contain path traversal patterns"
+            ));
+        }
+
+        // Validate rules_dir
+        let mut rules_dir = workspace_root.join(&self.config.rules_dir);
         if !rules_dir.exists() {
             fs::create_dir_all(&rules_dir)?;
         }
+        rules_dir = rules_dir.canonicalize()?;
+        if !rules_dir.starts_with(&workspace_root) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Path traversal detected: rules directory escapes workspace root"
+            ));
+        }
         
+        // Validate brain_path
         let brain_path = rules_dir.join(&self.config.rules_file);
+        // We can't canonicalize brain_path yet because it might not exist, 
+        // but it's safe because it's just a filename appended to a validated rules_dir
+        // and we verify the file name doesn't contain path separators
+        if self.config.rules_file.contains('/') || self.config.rules_file.contains('\\') {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Invalid rules file name"
+            ));
+        }
+        
         fs::write(&brain_path, &self.brain_content)?;
         
         if self.config.supports_multiple_files {
+            if self.config.guard_file.contains('/') || self.config.guard_file.contains('\\') {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Invalid guard file name"
+                ));
+            }
             let guard_path = rules_dir.join(&self.config.guard_file);
             fs::write(&guard_path, &self.guard_content)?;
             
@@ -594,16 +629,18 @@ impl RulesGenerationResult {
         }
         
         // Add to .gitignore
-        Self::add_to_gitignore(&self.workspace_root, &self.config)?;
+        Self::add_to_gitignore(&workspace_root, &self.config)?;
         
         Ok(())
     }
     
-    fn add_to_gitignore(workspace_root: &str, config: &IdeRulesConfig) -> std::io::Result<()> {
+    fn add_to_gitignore(workspace_root: &std::path::Path, config: &IdeRulesConfig) -> std::io::Result<()> {
         use std::fs::{File, OpenOptions};
         use std::io::Write;
         
-        let gitignore_path = std::path::Path::new(workspace_root).join(".gitignore");
+        let gitignore_path = workspace_root.join(".gitignore");
+        // No traversal risk here because we're just appending the literal string ".gitignore"
+        // to our already canonicalized workspace_root.
         
         let entries = if config.rules_dir == "." {
             vec![

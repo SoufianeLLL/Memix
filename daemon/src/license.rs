@@ -308,6 +308,10 @@ impl LicenseValidator {
     }
 
     async fn load_and_verify_cache(&self, raw_key: &str) -> Option<LicenseCache> {
+        let metadata = tokio::fs::metadata(&self.cache_path).await.ok()?;
+        if metadata.len() > 1024 * 1024 {
+            return None;
+        }
         let bytes = tokio::fs::read(&self.cache_path).await.ok()?;
         let cache: LicenseCache = serde_json::from_slice(&bytes).ok()?;
         if cache.raw_key != raw_key {

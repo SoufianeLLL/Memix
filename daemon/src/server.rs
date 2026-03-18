@@ -1331,7 +1331,9 @@ async fn team_sync(
     }
     let team_id = req
         .team_id
-        .or_else(|| state.configured_team_id.clone())
+        .as_deref()
+        .or(state.configured_team_id.as_deref())
+        .filter(|value| value.len() <= 200)
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .ok_or(StatusCode::BAD_REQUEST)?;
