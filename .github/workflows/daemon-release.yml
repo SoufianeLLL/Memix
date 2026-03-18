@@ -10,6 +10,7 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  MIN_EXTENSION_VERSION: ${{ vars.MIN_EXTENSION_VERSION }}
 
 jobs:
   build:
@@ -170,6 +171,7 @@ jobs:
             const manifest = {
               version: process.env.VERSION,
               released_at: new Date().toISOString(),
+              minExtensionVersion: process.env.MIN_EXTENSION_VERSION || undefined,
               binaries: {
                 'darwin-arm64':  { url: base + '/memix-daemon-darwin-arm64',      sha256: checksums['darwin-arm64'] || checksums['darwin-arm64.exe'] || '' },
                 'darwin-x64':    { url: base + '/memix-daemon-darwin-x64',        sha256: checksums['darwin-x64'] || checksums['darwin-x64.exe'] || '' },
