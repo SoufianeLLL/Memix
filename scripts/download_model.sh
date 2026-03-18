@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-MODEL_DIR="models/all-MiniLM-L6-v2"
+MODEL_DIR="$(dirname "$0")/../daemon/models/all-MiniLM-L6-v2"
 BASE="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main"
 
 mkdir -p "$MODEL_DIR/onnx"
