@@ -123,14 +123,19 @@ jobs:
         id: checksums
         run: |
           cd release-assets
-          # Find all files (not directories) matching the pattern
-          find . -type f -name "memix-daemon-*" -print0 | while IFS= read -r -d '' f; do
-            # Get just the filename without path
-            filename=$(basename "$f")
-            echo "Checksumming: $filename"
-            sha256sum "$f" | awk '{print $1 "  " FILENAME}' FILENAME="$filename" >> ../checksums.txt
+          # Clear the file
+          > ../checksums.txt
+          # Loop through files and generate clean output
+          for f in memix-daemon-*; do
+            if [ -f "$f" ]; then
+              echo "Processing: $f"
+              # Get the base filename without any path
+              filename=$(basename "$f")
+              # Calculate checksum and append with clean filename
+              sha256sum "$f" | awk '{print $1 "  " filename}' filename="$filename" >> ../checksums.txt
+            fi
           done
-          echo "=== Checksums ==="
+          echo "=== Final checksums.txt content ==="
           cat ../checksums.txt
 
       - name: Generate manifest.json
@@ -138,25 +143,61 @@ jobs:
           VERSION="${GITHUB_REF_NAME#daemon-v}"
           node -e "
             const fs = require('fs');
-            const lines = fs.readFileSync('checksums.txt', 'utf8').trim().split('\n');
             const checksums = {};
+            
+            console.log('Reading checksums.txt...');
+            const content = fs.readFileSync('checksums.txt', 'utf8');
+            console.log('Raw content:', content);
+            
+            const lines = content.trim().split('\n');
             for (const line of lines) {
-              const [hash, file] = line.split(/\s+/);
-              checksums[file.replace('memix-daemon-', '').replace('.exe', '')] = hash;
+              if (line.trim()) {
+                const parts = line.trim().split(/\s+/);
+                const hash = parts[0];
+                // The filename might have spaces, so join the rest
+                const file = parts.slice(1).join(' ');
+                console.log(`Found: hash='\${hash}', file='\${file}'`);
+                
+                // Extract platform from filename (remove 'memix-daemon-' prefix)
+                let platform = file.replace('memix-daemon-', '');
+                // Store with the exact platform name
+                checksums[platform] = hash;
+                console.log(`  -> Stored checksums['\${platform}'] = \${hash}`);
+              }
             }
+            
             const base = 'https://github.com/' + process.env.GITHUB_REPOSITORY + '/releases/download/' + process.env.GITHUB_REF_NAME;
             const manifest = {
               version: process.env.VERSION,
               released_at: new Date().toISOString(),
               binaries: {
-                'darwin-arm64':  { url: base + '/memix-daemon-darwin-arm64',      sha256: checksums['darwin-arm64'] },
-                'darwin-x64':    { url: base + '/memix-daemon-darwin-x64',        sha256: checksums['darwin-x64'] },
-                'linux-x64':     { url: base + '/memix-daemon-linux-x64',         sha256: checksums['linux-x64'] },
-                'windows-x64':   { url: base + '/memix-daemon-windows-x64.exe',   sha256: checksums['windows-x64'] },
+                'darwin-arm64':  { url: base + '/memix-daemon-darwin-arm64',      sha256: checksums['darwin-arm64'] || checksums['darwin-arm64.exe'] || '' },
+                'darwin-x64':    { url: base + '/memix-daemon-darwin-x64',        sha256: checksums['darwin-x64'] || checksums['darwin-x64.exe'] || '' },
+                'linux-x64':     { url: base + '/memix-daemon-linux-x64',         sha256: checksums['linux-x64'] || checksums['linux-x64.exe'] || '' },
+                'windows-x64':   { url: base + '/memix-daemon-windows-x64.exe',   sha256: checksums['windows-x64.exe'] || checksums['windows-x64'] || '' },
               }
             };
-            fs.writeFileSync('manifest.json', JSON.stringify(manifest, null, 2));
+            
+            console.log('\\n=== Final Manifest Object ===');
             console.log(JSON.stringify(manifest, null, 2));
+            
+            fs.writeFileSync('manifest.json', JSON.stringify(manifest, null, 2));
+            
+            // Verify all required fields are present
+            const required = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'windows-x64'];
+            let missing = [];
+            for (const platform of required) {
+              if (!manifest.binaries[platform].sha256) {
+                missing.push(platform);
+              }
+            }
+            
+            if (missing.length > 0) {
+              console.error('\\n❌ ERROR: Missing SHA256 for:', missing.join(', '));
+              process.exit(1);
+            } else {
+              console.log('\\n✅ All required SHA256 checksums present!');
+            }
           "
         env:
           VERSION: ${{ github.ref_name }}
