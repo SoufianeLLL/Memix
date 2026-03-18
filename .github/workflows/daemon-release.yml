@@ -118,7 +118,7 @@ jobs:
         run: |
           cd dist
           find . -maxdepth 2 -name 'memix-daemon-*' -type f | while read f; do
-            sha256sum "$f" | sed 's|\./[^/]*/||' >> ../checksums.txt
+            sha256sum "$f" | awk '{ file=$2; sub(/^\.\//, "", file); sub(/.*\//, "", file); print $1 "  " file }' >> ../checksums.txt
           done
           cat ../checksums.txt
 
@@ -175,7 +175,18 @@ jobs:
 
       - name: Push manifest to api.memix.dev
         run: |
-          curl --fail --silent --show-error -X POST https://api.memix.dev/daemon/manifest \
+          RESPONSE_FILE=$(mktemp)
+          HTTP_CODE=$(curl --silent --show-error \
+            --output "$RESPONSE_FILE" \
+            --write-out "%{http_code}" \
+            -X POST https://api.memix.dev/daemon/manifest \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.MANIFEST_DEPLOY_SECRET }}" \
-            -d @manifest.json
+            -d @manifest.json)
+
+          cat "$RESPONSE_FILE"
+
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "Manifest POST failed with status $HTTP_CODE"
+            exit 1
+          fi
