@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     name: Build ${{ matrix.binary }}
@@ -106,20 +109,28 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: dist/
+          path: artifacts/
 
-      - name: Flatten dist folder
+      - name: Prepare binaries for release
         run: |
-          find dist -type f -exec mv {} dist/ \;
-          find dist -type d -empty -delete
+          mkdir -p release-assets
+          # Find and copy all binaries to release-assets
+          find artifacts -type f -name "memix-daemon-*" -exec cp {} release-assets/ \;
+          echo "Files ready for release:"
+          ls -la release-assets/
 
       - name: Compute SHA-256 checksums
         id: checksums
         run: |
-          cd dist
-          find . -maxdepth 2 -name 'memix-daemon-*' -type f | while read f; do
-            sha256sum "$f" | awk '{ file=$2; sub(/^\.\//, "", file); sub(/.*\//, "", file); print $1 "  " file }' >> ../checksums.txt
+          cd release-assets
+          # Find all files (not directories) matching the pattern
+          find . -type f -name "memix-daemon-*" -print0 | while IFS= read -r -d '' f; do
+            # Get just the filename without path
+            filename=$(basename "$f")
+            echo "Checksumming: $filename"
+            sha256sum "$f" | awk '{print $1 "  " FILENAME}' FILENAME="$filename" >> ../checksums.txt
           done
+          echo "=== Checksums ==="
           cat ../checksums.txt
 
       - name: Generate manifest.json
@@ -162,14 +173,25 @@ jobs:
             console.log(JSON.stringify(manifest, null, 2));
           "
 
+      - name: Debug - List files before upload
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Contents of current directory:"
+          ls -la
+          echo "Contents of release-assets folder:"
+          ls -la release-assets/ || echo "release-assets folder not found"
+          echo "Searching for binaries:"
+          find . -name "memix-daemon-*" -type f
+          
       - name: Upload binaries to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: "Daemon ${{ github.ref_name }}"
           files: |
-            dist/memix-daemon-*
+            release-assets/memix-daemon-*
             manifest.json
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -187,6 +209,8 @@ jobs:
           cat "$RESPONSE_FILE"
 
           if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
-            echo "Manifest POST failed with status $HTTP_CODE"
+            echo "❌ Manifest POST failed with status $HTTP_CODE"
             exit 1
+          else
+            echo "✅ Manifest successfully pushed to API"
           fi
