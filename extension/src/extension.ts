@@ -70,7 +70,7 @@ async function upsertMemixConfigRedisUrl(redisUrl: string): Promise<void> {
 		// ignore
 	}
 
-	const line = `redis_url = "${redisUrl.replace(/"/g, '\\"')}"`;
+	const line = `redis_url = "${redisUrl.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 	if (!existing.trim()) {
 		await fs.promises.writeFile(configPath, `${line}\n`, 'utf8');
 		return;

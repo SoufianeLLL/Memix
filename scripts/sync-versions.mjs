@@ -42,6 +42,9 @@ if (serverRs === nextServerRs) {
 	console.log(`Updated daemon/src/server.rs to ${versions.daemonVersion}`);
 }
 
+const brainTsPath = path.join(root, 'extension', 'src', 'core', 'brain.ts');
+const exporterTsPath = path.join(root, 'extension', 'src', 'utils', 'exporter.ts');
+
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 if (packageJson.version === versions.extensionVersion) {
 	console.log(`extension/package.json already at ${versions.extensionVersion}`);
@@ -49,4 +52,28 @@ if (packageJson.version === versions.extensionVersion) {
 	packageJson.version = versions.extensionVersion;
 	fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, '\t')}\n`);
 	console.log(`Updated extension/package.json to ${versions.extensionVersion}`);
+}
+
+const brainTs = fs.readFileSync(brainTsPath, 'utf8');
+const nextBrainTs = brainTs.replace(
+	/^\s*brainVersion:\s*'.*',$/m,
+	`            brainVersion: '${versions.extensionVersion}',`
+);
+if (brainTs === nextBrainTs) {
+	console.log(`extension/src/core/brain.ts already at ${versions.extensionVersion}`);
+} else {
+	fs.writeFileSync(brainTsPath, nextBrainTs);
+	console.log(`Updated extension/src/core/brain.ts to ${versions.extensionVersion}`);
+}
+
+const exporterTs = fs.readFileSync(exporterTsPath, 'utf8');
+const nextExporterTs = exporterTs.replace(
+	/^\s*memix_version:\s*'.*',$/m,
+	`        memix_version: '${versions.extensionVersion}',`
+);
+if (exporterTs === nextExporterTs) {
+	console.log(`extension/src/utils/exporter.ts already at ${versions.extensionVersion}`);
+} else {
+	fs.writeFileSync(exporterTsPath, nextExporterTs);
+	console.log(`Updated extension/src/utils/exporter.ts to ${versions.extensionVersion}`);
 }

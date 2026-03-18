@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       min_extension_version:
-        description: 'Minimum extension version required for this daemon (e.g. 1.0.0-beta.5). Leave empty if no breaking changes.'
+        description: 'Minimum extension version required for this daemon (e.g. 1.2.0). Leave empty if no breaking changes.'
         required: false
         default: ''
       platform:

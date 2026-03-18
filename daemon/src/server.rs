@@ -1119,7 +1119,8 @@ async fn compile_context(
 	};
 	let graph = state.autonomous.lock().await.dependency_graph.clone();
 	let history = state.recorder.dump_blackbox();
-	let compiler = ContextCompiler::new(state.workspace_root.clone().map(PathBuf::from));
+	let root = state.workspace_root.as_deref().filter(|s| s.len() < 1024).map(PathBuf::from);
+	let compiler = ContextCompiler::new(root);
 	match compiler.compile(req, &graph, &history, &entries) {
 		Ok(compiled) => (StatusCode::OK, Json(compiled)).into_response(),
 		Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),

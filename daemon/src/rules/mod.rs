@@ -572,10 +572,15 @@ impl RulesGenerationResult {
         // Canonicalize workspace root to ensure clean base path
         let workspace_root = Path::new(&self.workspace_root).canonicalize()?;
         
-        if self.config.rules_dir.contains("..") {
+        // Strictly validate rules_dir to prevent absolute paths and parent directory traversal
+        let rules_dir_path = Path::new(&self.config.rules_dir);
+        if rules_dir_path.is_absolute() || rules_dir_path.components().any(|c| matches!(
+            c,
+            std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_)
+        )) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "rules directory cannot contain path traversal patterns"
+                "rules directory must be a clean relative path without traversal patterns",
             ));
         }
 
