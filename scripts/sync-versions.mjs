@@ -1,3 +1,5 @@
+// run `node scripts/sync-versions.mjs` to update versions.json
+
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +9,7 @@ const root = path.resolve(scriptDir, '..');
 const versionsPath = path.join(root, 'versions.json');
 const cargoTomlPath = path.join(root, 'daemon', 'Cargo.toml');
 const packageJsonPath = path.join(root, 'extension', 'package.json');
+const serverRsPath = path.join(root, 'daemon', 'src', 'server.rs');
 
 const versions = JSON.parse(fs.readFileSync(versionsPath, 'utf8'));
 
@@ -15,9 +18,14 @@ if (!versions.daemonVersion || !versions.extensionVersion) {
 }
 
 const cargoToml = fs.readFileSync(cargoTomlPath, 'utf8');
+const serverRs = fs.readFileSync(serverRsPath, 'utf8');
 const nextCargoToml = cargoToml.replace(
 	/^version = ".*"$/m,
 	`version = "${versions.daemonVersion}"`,
+);
+const nextServerRs = serverRs.replace(
+	/^\s*"version": \s*".*",$/m,
+	`        "version": "${versions.daemonVersion}",`
 );
 
 if (cargoToml === nextCargoToml) {
@@ -25,6 +33,13 @@ if (cargoToml === nextCargoToml) {
 } else {
 	fs.writeFileSync(cargoTomlPath, nextCargoToml);
 	console.log(`Updated daemon/Cargo.toml to ${versions.daemonVersion}`);
+}
+
+if (serverRs === nextServerRs) {
+	console.log(`daemon/src/server.rs already at ${versions.daemonVersion}`);
+} else {
+	fs.writeFileSync(serverRsPath, nextServerRs);
+	console.log(`Updated daemon/src/server.rs to ${versions.daemonVersion}`);
 }
 
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
