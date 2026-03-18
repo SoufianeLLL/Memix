@@ -1003,17 +1003,24 @@ async fn generate_rules(
 
     let result = RulesEngine::generate_for_ide(
         &req.project_id,
-        req.redis_url.as_deref(),
         ide,
         &req.workspace_root,
     );
 
-    match result.write_files() {
+    let write_result = tokio::task::spawn_blocking(move || {
+        let ok = result.write_files();
+        (ok, result.config)
+    }).await.map_err(|e| {
+        tracing::error!("Failed to join spawn_blocking for write_files: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    match write_result.0 {
         Ok(_) => Ok(Json(serde_json::json!({
             "success": true,
-            "config": result.config,
+            "config": write_result.1,
             "message": format!("Rules generated for {} in {}/", 
-                format!("{:?}", ide), result.config.rules_dir)
+                format!("{:?}", ide), write_result.1.rules_dir)
         }))),
         Err(e) => {
             tracing::error!("Failed to write rules files: {}", e);

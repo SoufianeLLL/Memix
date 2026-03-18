@@ -12,13 +12,6 @@ pub enum IdeType {
     Unknown,
 }
 
-impl IdeType {
-    pub fn detect() -> Self {
-        // This will be called from extension with IDE info passed in
-        // Default to VSCode-compatible format
-        Self::Vscode
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IdeRulesConfig {
@@ -527,17 +520,16 @@ Project: {project_id}"#,
 
     pub fn generate_for_ide(
         project_id: &str,
-        redis_url: Option<&str>,
         ide: IdeType,
         workspace_root: &str,
     ) -> RulesGenerationResult {
         let config = IdeRulesConfig::for_ide(ide);
         
-        let mut brain_content = Self::generate_brain_template(project_id, redis_url);
+        let mut brain_content = Self::generate_brain_template(project_id, None);
         let guard_content = Self::generate_guard_template(project_id, &config.guard_file);
         
         // Add frontmatter for IDEs that require it
-        let brain_file = match ide {
+        let final_guard_content = match ide {
             IdeType::Antigravity => {
                 let frontmatter = "---\ntrigger: always_on\ndescription: Memix AI Brain: Primary persistent project memory and initialization rules.\n---\n";
                 brain_content = format!("{}{}", frontmatter, brain_content);
@@ -550,7 +542,7 @@ Project: {project_id}"#,
         RulesGenerationResult {
             config,
             brain_content,
-            guard_content: brain_file,
+            guard_content: final_guard_content,
             workspace_root: workspace_root.to_string(),
         }
     }
@@ -565,27 +557,46 @@ pub struct RulesGenerationResult {
 }
 
 impl RulesGenerationResult {
+    fn safe_join(base: &std::path::Path, user_input: &str) -> std::io::Result<std::path::PathBuf> {
+        let mut current = base.to_path_buf();
+        for component in std::path::Path::new(user_input).components() {
+            match component {
+                std::path::Component::Normal(c) => {
+                    let name = c.to_string_lossy();
+                    if name.contains("..") || name.contains('/') || name.contains('\\') {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "Path component contains invalid characters",
+                        ));
+                    }
+                    current.push(c);
+                }
+                std::path::Component::CurDir => {}
+                _ => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Path traversal pattern detected",
+                    ));
+                }
+            }
+        }
+        Ok(current)
+    }
+
     pub fn write_files(&self) -> std::io::Result<()> {
         use std::fs;
-        use std::path::{Path, PathBuf};
+        use std::path::Path;
         
-        // Canonicalize workspace root to ensure clean base path
         let workspace_root = Path::new(&self.workspace_root).canonicalize()?;
-        
-        // Strictly validate rules_dir to prevent absolute paths and parent directory traversal
-        let rules_dir_path = Path::new(&self.config.rules_dir);
-        if rules_dir_path.is_absolute() || rules_dir_path.components().any(|c| matches!(
-            c,
-            std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_)
-        )) {
+        if !workspace_root.is_dir() {
             return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "rules directory must be a clean relative path without traversal patterns",
+                std::io::ErrorKind::NotFound,
+                "Workspace root must be an existing directory"
             ));
         }
 
-        // Validate rules_dir
-        let mut rules_dir = workspace_root.join(&self.config.rules_dir);
+        let mut rules_dir = Self::safe_join(&workspace_root, &self.config.rules_dir)?;
+
         if !rules_dir.exists() {
             fs::create_dir_all(&rules_dir)?;
         }
@@ -597,31 +608,13 @@ impl RulesGenerationResult {
             ));
         }
         
-        // Validate brain_path
-        let brain_path = rules_dir.join(&self.config.rules_file);
-        // We can't canonicalize brain_path yet because it might not exist, 
-        // but it's safe because it's just a filename appended to a validated rules_dir
-        // and we verify the file name doesn't contain path separators
-        if self.config.rules_file.contains('/') || self.config.rules_file.contains('\\') {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Invalid rules file name"
-            ));
-        }
-        
+        let brain_path = Self::safe_join(&rules_dir, &self.config.rules_file)?;
         fs::write(&brain_path, &self.brain_content)?;
         
         if self.config.supports_multiple_files {
-            if self.config.guard_file.contains('/') || self.config.guard_file.contains('\\') {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "Invalid guard file name"
-                ));
-            }
-            let guard_path = rules_dir.join(&self.config.guard_file);
+            let guard_path = Self::safe_join(&rules_dir, &self.config.guard_file)?;
             fs::write(&guard_path, &self.guard_content)?;
             
-            // Add companion link to brain file
             let companion_link = format!(
                 "\n\n---\n## COMPANION: {}\nYou MUST also read and obey {}. Both files are ONE system.",
                 self.config.guard_file, self.config.guard_file
@@ -633,7 +626,6 @@ impl RulesGenerationResult {
                 .write_all(companion_link.as_bytes())?;
         }
         
-        // Add to .gitignore
         Self::add_to_gitignore(&workspace_root, &self.config)?;
         
         Ok(())
@@ -643,7 +635,7 @@ impl RulesGenerationResult {
         use std::fs::{File, OpenOptions};
         use std::io::Write;
         
-        let gitignore_path = workspace_root.join(".gitignore");
+        let gitignore_path = Self::safe_join(workspace_root, ".gitignore")?;
         // No traversal risk here because we're just appending the literal string ".gitignore"
         // to our already canonicalized workspace_root.
         
