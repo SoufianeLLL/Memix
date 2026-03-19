@@ -208,7 +208,7 @@ impl LicenseValidator {
                 seats: None,
                 expires_at: None,
                 mode: None,
-                message: Some("no license key configured".to_string()),
+                message: Some("No license key configured".to_string()),
                 grace_until: None,
             };
         };

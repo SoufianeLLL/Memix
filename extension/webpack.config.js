@@ -44,5 +44,20 @@ const extensionConfig = {
   infrastructureLogging: {
     level: "log", // enables logging required for problem matchers
   },
+  // Enable watching
+  watchOptions: {
+    ignored: /node_modules/,
+    aggregateTimeout: 300,
+    poll: 1000 // Check for changes every second
+  },
+  
+  // Show build progress
+  stats: {
+    all: false,
+    errors: true,
+    warnings: true,
+    timings: true,
+    assets: true
+  }
 };
 module.exports = [ extensionConfig ];

@@ -134,6 +134,22 @@ When you need project context, fetch the smallest high-value set first:
 
 Only pull raw file content when the daemon surfaces are insufficient.
 
+## Memory Writeback
+
+When you need to persist information to the brain, write `.memix/brain/pending.json`.
+
+The merge rule is absolute: read the existing `.memix/brain/<key>.json` before every
+write. Your upsert must be the complete merged object, not a diff. Partial writes
+silently destroy fields that existed before.
+
+Every upsert must include `project_id` as a field inside the entry object itself.
+The `content` field must be a JSON string (stringified) containing the full value.
+
+After writing, the daemon validates, merges into Redis, clears the pending file,
+and optionally writes `.memix/brain/pending.ack.json` as confirmation.
+
+Do not write to brain files directly. Only use pending.json as the writeback channel.
+
 ## Security
 
 - Never store secrets, API keys, passwords, or raw credentials in memory.

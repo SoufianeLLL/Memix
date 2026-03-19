@@ -100,3 +100,6 @@ yarn.lock
 
 # Only ignore if you're using yarn/pnpm
 package-lock.json  
+
+# Memix AI Brain Rules
+.agents/rules/
