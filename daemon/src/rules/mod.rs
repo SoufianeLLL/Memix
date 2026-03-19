@@ -74,7 +74,7 @@ impl IdeRulesConfig {
 pub struct RulesEngine;
 
 impl RulesEngine {
-    pub fn generate_brain_template(project_id: &str, _redis_url: Option<&str>) -> String {
+    pub fn generate_brain_template(project_id: &str, guard_file: &str) -> String {
         format!(
             r#"# PERSISTENT MEMORY PROTOCOL CORE
 
@@ -110,16 +110,47 @@ Respond with:
 If brain files are missing/empty: *"No brain files found yet. The daemon should mirror them into `.memix/brain/`. Ask the user to ensure the Memix daemon is running for this workspace, then re-try."*
 
 ## WRITEBACK (AI → Daemon)
-You may propose updates by writing a file at `.memix/brain/pending.json`.
+⚠️ MERGE RULE — CRITICAL — READ BEFORE EVERY WRITE:
+MANDATORY SEQUENCE — follow in this exact order, never skip steps:
 
-Schema:
+Step 1: Before writing any upsert, Read the current file.
+  → Run: read_file(".memix/brain/session_state.json")
+  → If the file doesn't exist, start with an empty object.
+  → Paste the current content into your working context before continuing.
+
+Step 2: Build the merged object.
+  → Take the current content from Step 1.
+  → Apply ONLY your new changes on top of it.
+  → The result must contain EVERY field that was in Step 1, plus your additions.
+  → Never remove fields. Never shorten arrays. Only add or update.
+
+Step 3: Write `.memix/brain/pending.json`.
+  → The content field must be the COMPLETE merged object from Step 2, JSON-stringified.
+  → Include project_id inside every upsert entry.
+  → Do not skip Step 1 or Step 2. Writing without reading first is a protocol violation.
+
+Every upsert object MUST include "project_id" as a field inside the object itself,
+matching the top-level project_id. Example of a correct upsert:
+
+JSON Format:
 {{
-  "project_id": "<PROJECT_ID>",
-  "upserts": [ <MemoryEntry JSON objects> ],
-  "deletes": [ "<entry_id>", "<entry_id>" ]
+  "id": "session_state",
+  "project_id": "PROJECT_ID_HERE",
+  "kind": "context",
+  "content": "{{ ...COMPLETE merged JSON string, not partial... }}",
+  "tags": ["session"]
 }}
 
-After the daemon merges the update, it will clear `pending.json` and may write `.memix/brain/pending.ack.json`.
+Schema for the full pending.json:
+JSON Format:
+{{
+  "project_id": "<PROJECT_ID>",
+  "upserts": [ <complete MemoryEntry objects as above> ],
+  "deletes": [ "<entry_id>" ]
+}}
+
+After the daemon merges the update, it will clear `pending.json`
+and may write `.memix/brain/pending.ack.json` to confirm success.
 
 ## MEMORY SCHEMA (brain keys)
 All updates append/update, never delete unless specified.
@@ -137,6 +168,9 @@ JSON Format:
 
 ### 'session_state.json' – current work snapshot
 Update: After EVERY completed task or significant progress.
+Merge rule: Always read .memix/brain/session_state.json first. Keep all existing fields
+(progress history, blockers, modified_files, next_steps). Only update the fields relevant
+to this task. Append to arrays rather than replacing them.
 JSON Format:
 {{
   "last_updated": "2026-02-28T14:30:00Z",
@@ -226,7 +260,9 @@ JSON Format:
 - **When task completed naturally:** update tasks.json, add new follow‑up tasks.
 
 When the user asks you to create a task list:
-1. Read the current .memix/brain/tasks.json
+⚠️ When writing tasks to pending.json: you MUST include the ENTIRE tasks structure
+(all lists, all tasks, including completed ones from previous sessions).
+1. Read the current .memix/brain/tasks.json - (this task is required, not optional)
 2. Generate unique IDs continuing from the highest existing ID
 3. Add the new list to the lists array — do NOT replace existing lists
 4. Set current_list to the new list name
@@ -525,7 +561,7 @@ Project: {project_id}"#,
     ) -> RulesGenerationResult {
         let config = IdeRulesConfig::for_ide(ide);
         
-        let mut brain_content = Self::generate_brain_template(project_id, None);
+        let mut brain_content = Self::generate_brain_template(project_id, &config.guard_file);
         let guard_content = Self::generate_guard_template(project_id, &config.guard_file);
         
         // Add frontmatter for IDEs that require it
@@ -544,6 +580,7 @@ Project: {project_id}"#,
             brain_content,
             guard_content: final_guard_content,
             workspace_root: workspace_root.to_string(),
+            project_id: project_id.to_string(),
         }
     }
 }
@@ -554,6 +591,7 @@ pub struct RulesGenerationResult {
     pub brain_content: String,
     pub guard_content: String,
     pub workspace_root: String,
+    pub project_id: String,
 }
 
 impl RulesGenerationResult {
@@ -627,6 +665,15 @@ impl RulesGenerationResult {
         }
         
         Self::add_to_gitignore(&workspace_root, &self.config)?;
+
+        // Write AGENTS.md to workspace root if it doesn't exist yet.
+        // This is the universal agent protocol file read by Claude Code, Cursor, and others.
+        // We only write it if absent — never overwrite a user-customized version.
+        let agents_path = workspace_root.join("AGENTS.md");
+        if !agents_path.exists() {
+            let agents_content = RulesEngine::generate_agents_template(&self.project_id);
+            fs::write(&agents_path, agents_content)?;
+        }
         
         Ok(())
     }
