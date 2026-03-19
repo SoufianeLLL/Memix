@@ -165,7 +165,7 @@ fn entity_query_for_extension(extension: &str) -> Option<&'static str> {
         "ts" | "tsx" => Some(
             "(function_declaration name: (identifier) @name) @entity
              (method_definition name: (property_identifier) @name) @entity
-             (class_declaration name: [(identifier) (type_identifier)] @name) @entity
+             (class_declaration name: (type_identifier) @name) @entity
              (lexical_declaration (variable_declarator name: (identifier) @name value: [(arrow_function) (function_expression)] @entity))
              (variable_declaration (variable_declarator name: (identifier) @name value: [(arrow_function) (function_expression)] @entity))",
         ),
