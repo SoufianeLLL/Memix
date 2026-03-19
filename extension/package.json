@@ -207,12 +207,14 @@
 		}
 	},
 	"scripts": {
+		"build:css": "npx @tailwindcss/cli -i ./src/panel/styles/tailwind.css -o ./media/app.css",
+		"watch:css": "npx @tailwindcss/cli -i ./src/panel/styles/tailwind.css -o ./media/app.css --watch",
+		"compile": "npm run build:css && webpack",
+		"watch": "npm run watch:css && webpack --watch",
+		"vscode:prepublish": "npm run build:css && npm run compile",
 		"sync:versions": "node ../scripts/sync-versions.mjs",
 		"package": "vsce package",
 		"publish": "vsce publish",
-		"vscode:prepublish": "npm run compile",
-		"compile": "webpack",
-		"watch": "webpack --watch",
 		"lint": "eslint src --ext ts",
 		"test": "npm run lint --if-present && npx tsc --noEmit"
 	},
@@ -229,7 +231,10 @@
 		"@types/vscode": "^1.107.0",
 		"@vscode/test-cli": "^0.0.11",
 		"@vscode/test-electron": "^2.5.2",
+		"autoprefixer": "^10.4.27",
 		"eslint": "^9.39.3",
+		"postcss": "^8.5.8",
+		"tailwindcss": "^4.2.2",
 		"ts-loader": "^9.5.4",
 		"typescript": "^5.9.3",
 		"typescript-eslint": "^8.56.1",

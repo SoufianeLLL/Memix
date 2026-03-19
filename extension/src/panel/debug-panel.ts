@@ -81,97 +81,26 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 			.replace(/'/g, '&#39;');
 	}
 
-	private getCenteredPayloadHtml(title: string, payload: string, subtitle?: string) {
-		const safeTitle = this.escapeWebviewHtml(title);
-		const safeSubtitle = this.escapeWebviewHtml(subtitle || '');
-		const safePayload = this.escapeWebviewHtml(payload);
-		return /* html */`<!DOCTYPE html>
-<html>
-<head>
-	<style>
-		body {
-			margin: 0;
-			padding: 24px;
-			font-family: var(--vscode-font-family);
-			background: var(--vscode-editor-background);
-			color: var(--vscode-foreground);
-		}
-		.shell {
-			max-width: 980px;
-			margin: 0 auto;
-			border: 1px solid rgba(255, 255, 255, 0.12);
-			border-radius: 14px;
-			overflow: hidden;
-			box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
-			background: color-mix(in srgb, var(--vscode-editor-background) 92%, black 8%);
-		}
-		.header {
-			display: flex;
-			justify-content: space-between;
-			align-items: flex-start;
-			gap: 12px;
-			padding: 18px 20px 14px;
-			border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-		}
-		.title {
-			font-size: 18px;
-			font-weight: 700;
-		}
-		.subtitle {
-			margin-top: 6px;
-			font-size: 12px;
-			line-height: 1.5;
-			color: var(--vscode-descriptionForeground);
-		}
-		pre {
-			margin: 0;
-			padding: 20px;
-			overflow: auto;
-			font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-			font-size: 12px;
-			line-height: 1.55;
-			white-space: pre-wrap;
-			word-break: break-word;
-		}
-	</style>
-</head>
-<body>
-	<div class="shell">
-		<div class="header">
-			<div>
-				<div class="title">${safeTitle}</div>
-				<div class="subtitle">${safeSubtitle}</div>
-			</div>
-			<button id="copy" class="action-btn">Copy</button>
-		</div>
-		<pre>${safePayload}</pre>
-	</div>
-	<script>
-		const vscode = acquireVsCodeApi();
-		document.getElementById('copy').addEventListener('click', function() {
-			vscode.postMessage({ command: 'copyText' });
-		});
-	</script>
-</body>
-</html>`;
-	}
-
-	private openCenteredPayloadView(title: string, payload: string, subtitle?: string, notice?: string) {
-		const panel = vscode.window.createWebviewPanel(
-			'memix.payloadView',
-			title,
-			vscode.ViewColumn.Active,
-			{ enableScripts: true, retainContextWhenHidden: false }
-		);
-		panel.webview.html = this.getCenteredPayloadHtml(title, payload, subtitle);
-		panel.webview.onDidReceiveMessage(async (msg) => {
-			if (msg?.command === 'copyText') {
-				await vscode.env.clipboard.writeText(payload);
-				if (notice) {
-					vscode.window.showInformationMessage(notice);
+	private async openCenteredPayloadView(title: string, payload: string, subtitle?: string, notice?: string) {
+		try {
+			let language = 'plaintext';
+			if (payload.trim().startsWith('{') || payload.trim().startsWith('[')) {
+				try {
+					JSON.parse(payload);
+					language = 'json';
+				} catch (e) {
+					// Fall back to plaintext
 				}
 			}
-		});
+
+			const document = await vscode.workspace.openTextDocument({
+				content: payload,
+				language
+			});
+			await vscode.window.showTextDocument(document, { preview: false });
+		} catch (error) {
+			vscode.window.showErrorMessage(`Failed to open payload: ${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 
 	private async runPanelCommand<T>(loadingText: string, action: () => Promise<T>, options?: { refreshAfter?: boolean }) {
@@ -750,457 +679,37 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	private getTailwindCSS(): string {
+		try {
+			const fs = require('fs');
+			const path = require('path');
+			// app.css is compiled to media/app.css and included with the extension package
+			const cssPath = path.join(this.extensionUri.fsPath, 'media', 'app.css');
+			return fs.readFileSync(cssPath, 'utf8');
+		} catch {
+			return '';
+		}
+	}
+
 	private getHtml(): string {
 		return /* html */`<!DOCTYPE html>
 <html>
 <head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<style>
-		body {
-			font-family: var(--vscode-font-family);
-			color: var(--vscode-foreground);
-			background: var(--vscode-sideBar-background);
-			padding: 10px;
-			font-size: 12px;
-		}
-		#loading-overlay {
-			position: fixed;
-			top: 0; left: 0; width: 100%; height: 100%;
-			background: var(--vscode-editor-background);
-			display: flex;
-			flex-direction: column;
-			align-items: center;
-			justify-content: center;
-			z-index: 9999;
-			opacity: 0.85;
-		}
-		#loading-overlay[hidden] { display: none; }
-		.spinner {
-			animation: spin 1s linear infinite;
-			margin-bottom: 12px;
-			color: var(--vscode-textLink-foreground);
-		}
-		@keyframes spin { 100% { transform: rotate(360deg); } }
-		.header {
-			display: flex;
-			justify-content: space-between;
-			align-items: center;
-			gap: 8px;
-			margin-bottom: 10px;
-		}
-
-		:root {
-			--memix-primary-color: var(--vscode-editor-foreground);
-		}
-
-		.tabs {
-			display: flex;
-			margin-bottom: 10px;
-		}
-		.tab {
-			flex: 1;
-			border: none;
-			border-bottom: 2px solid color-mix(in srgb, var(--vscode-sideBar-background) 80%, var(--memix-primary-color) 10%);
-			background: transparent;
-			color: color-mix(in srgb, var(--memix-primary-color) 50%, var(--vscode-descriptionForeground) 30%);
-			padding: 8px 12px;
-			font-size: 13px;
-			font-weight: 400;
-			letter-spacing: 0.01em;
-			transition: color 0.15s ease, border-color 0.15s ease;
-			cursor: pointer;
-		}
-		.tab span {
-			vertical-align: middle;
-		}
-		.tab.active {
-			color: var(--memix-primary-color);
-			border-bottom-color: var(--memix-primary-color);
-		}
-		.view { display: none; }
-		.view.active { display: block; }
-		.empty {
-			display: none;
-			min-height: calc(100vh - 90px);
-			align-items: center;
-			justify-content: center;
-			text-align: center;
-			padding: 20px 10px;
-		}
-		.empty.open { display: flex; }
-		.empty-inner {
-			display: flex;
-			flex-direction: column;
-			align-items: center;
-			gap: 10px;
-			max-width: 240px;
-		}
-		.empty-title {
-			font-size: 12px;
-			font-weight: 600;
-		}
-		.empty-sub {
-			font-size: 11px;
-			color: var(--vscode-descriptionForeground);
-			line-height: 1.4;
-		}
-		.card {
-			background: transparent;
-			border-top: 1px solid rgba(255, 255, 255, 0.07);
-			padding: 25px 10px;
-			margin-bottom: 8px;
-		}
-		.card h3 {
-			margin: 0 0 12px 0;
-			font-size: 14px;
-			color: var(--memix-primary-color);
-		}
-		.stat {
-			display: flex;
-			justify-content: space-between;
-			padding: 4px 0;
-			border: 0;
-		}
-		.icon-btn {
-			background: transparent;
-			border: 0;
-			color: var(--vscode-foreground);
-			cursor: pointer;
-			font-size: 12px;
-			padding: 0 4px;
-			opacity: 0.8;
-		}
-		.icon-btn:hover { opacity: 1; }
-		.select {
-			background: transparent;
-			border: 1px solid rgba(255, 255, 255, 0.12);
-			color: var(--vscode-foreground);
-			border-radius: 6px;
-			padding: 4px 8px 4px 6px;
-			font-size: 11px;
-		}
-		.mono {
-			font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-			font-size: 11px;
-			line-height: 1.35;
-			white-space: pre-wrap;
-			word-break: break-word;
-		}
-		.stat:last-child { border-bottom: none; }
-		.stat-value {
-			font-weight: bold;
-			font-size: 11px
-		}
-		.health-healthy { color: #4ec9b0; }
-		.health-warning { color: #cca700; }
-		.health-critical { color: #f44747; }
-		.bar {
-			height: 6px;
-			background: var(--vscode-panel-border);
-			border-radius: 3px;
-			margin: 4px 0;
-			overflow: hidden;
-		}
-		.bar-fill {
-			height: 100%;
-			border-radius: 3px;
-			transition: width 0.3s;
-		}
-		.key-table {
-			display: grid;
-			grid-template-columns: 1fr auto;
-			gap: 6px 10px;
-			font-size: 12px;
-			color: var(--vscode-descriptionForeground);
-		}
-		.key-table .k { color: var(--vscode-foreground); }
-		.key-label {
-			display: inline-flex;
-			align-items: center;
-			gap: 6px;
-		}
-		.info-icon {
-			display: inline-flex;
-			align-items: center;
-			justify-content: center;
-			width: 14px;
-			height: 14px;
-			font-size: 10px;
-			line-height: 1;
-			color: var(--vscode-descriptionForeground);
-		}
-		.info-icon svg {
-			width: 11px;
-			height: 11px;
-			fill: currentColor;
-			strokeWidth: 2px;
-		}
-		.hover-widget {
-			/* Positioning */
-			position: fixed;
-			z-index: 1000;
-			white-space: normal;
-			max-width: 280px;
-			border: 1px solid var(--vscode-editorHoverWidget-border, #454545);
-			border-radius: 4px;
-			padding: 8px 12px;
-			background: var(--vscode-editorHoverWidget-background);
-			border-color: var(--vscode-editorHoverWidget-border);
-			/* Text colors */
-			color: var(--vscode-editorHoverWidget-foreground);
-			/* Optional shadow */
-			box-shadow: 0 2px 8px var(--vscode-widget-shadow);
-			/* Typography */
-			font-family: var(--vscode-font-family);
-			font-size: 11px;
-			line-height: 1.45;
-			pointer-events: none;
-		}
-		.warning { font-size: 11px; margin: 4px 0; }
-		.card-actions {
-			display: flex;
-			gap: 6px;
-			align-items: center;
-			flex-wrap: wrap;
-			margin-top: 4px;
-		}
-		.action-btn {
-			background: var(--vscode-button-background);
-			color: var(--vscode-button-foreground);
-			border: 1px solid var(--vscode-button-border, transparent);
-			border-radius: 4px;
-			padding: 6px 14px;
-			font-size: 13px;
-			font-weight: 400;
-			cursor: pointer;
-			display: inline-flex;
-			align-items: center;
-			justify-content: center;
-			transition: background 0.1s ease;
-		}
-		.action-btn:hover {
-			background: var(--vscode-button-hoverBackground);
-		}
-		.action-btn.secondary {
-			background: var(--vscode-button-secondaryBackground, rgba(128,128,128,0.1));
-			color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
-			border-color: var(--vscode-button-secondaryBorder, transparent);
-			padding: 4px 10px;
-			font-size: 11px;
-		}
-		.action-btn.secondary:hover {
-			background: var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.2));
-		}
-		.action-btn[hidden] { display: none; }
-		.action-btn:disabled {
-			opacity: 0.5;
-			cursor: not-allowed;
-		}
-		.summary-row {
-			font-size: 11px;
-			line-height: 1.5;
-			color: var(--vscode-descriptionForeground);
-		}
-		.summary-row strong { color: var(--vscode-foreground); }
-		.coverage-summary {
-			margin-bottom: 8px;
-			font-size: 11px;
-			line-height: 1.5;
-			color: var(--vscode-descriptionForeground);
-		}
-		.status-ok { color: #4ec9b0; }
-		.status-warning { color: #cca700; }
-		.status-danger { color: #f44747; }
-		.status-subtle { color: var(--vscode-descriptionForeground); }
-		.modal-backdrop {
-			position: fixed;
-			inset: 0;
-			background: rgba(0, 0, 0, 0.5);
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			z-index: 10000;
-			padding: 16px;
-		}
-		.modal-backdrop[hidden] { display: none; }
-		.modal-shell {
-			width: min(760px, 100%);
-			max-height: min(80vh, 900px);
-			background: var(--vscode-editor-background);
-			border: 1px solid rgba(255, 255, 255, 0.12);
-			border-radius: 12px;
-			display: flex;
-			flex-direction: column;
-			overflow: hidden;
-			box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
-		}
-		.modal-header {
-			padding: 12px 14px 8px;
-			border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-		}
-		.modal-header > div {
-			display: flex;
-			justify-content: space-between;
-			align-items: center;
-			gap: 8px;
-		}
-		.modal-title {
-			font-size: 13px;
-			font-weight: 600;
-		}
-		.modal-subtitle {
-			padding: 5px 0 10px;
-			font-size: 11px;
-			color: var(--vscode-descriptionForeground);
-		}
-		.modal-body {
-			padding: 12px 14px;
-			overflow: auto;
-			font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-			font-size: 11px;
-			line-height: 1.45;
-			white-space: pre-wrap;
-			word-break: break-word;
-		}
-		.modal-actions {
-			display: flex;
-			justify-content: flex-end;
-			gap: 8px;
-			padding: 12px 14px;
-			border-top: 1px solid rgba(255, 255, 255, 0.08);
-		}
-		.category { margin: 4px 0 8px; }
-		.category-name {
-			display: flex;
-			justify-content: space-between;
-			font-size: 12px;
-			text-transform: capitalize;
-		}
-		.category-name span {
-			font-size: 11px;
-		}
-		.badge {
-			background: var(--vscode-badge-background);
-			color: var(--vscode-badge-foreground);
-			border-radius: 11px;
-			padding: 2px 6px;
-			font-size: 10px;
-			font-weight: 600;
-			margin-left: 6px;
-		}
-		.advanced-grid {
-			gap: 8px;
-			margin-top: 2px;
-		}
-		.metric-box {
-			display: flex;
-			flex-direction: column;
-			align-items: center;
-		}
-		.metric-value {
-			width: 100%;
-			color: var(--memix-primary-color);
-			font-size: 16px;
-			font-weight: bold;
-		}
-		.metric-label {
-			flex-shrink: 0;
-			font-size: 10px;
-			color: var(--vscode-descriptionForeground);
-			text-transform: uppercase;
-		}
-		.task-item {
-			display: flex;
-			align-items: flex-start;
-			gap: 8px;
-			padding: 6px 0;
-			border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-		}
-		.task-item:last-child { border-bottom: none; }
-		.task-bullet { color: #cca700; margin-top: 2px; }
-		#error-banner {
-			color: #f44747;
-			margin-bottom: 12px;
-			display: none;
-		}
-		
-		/* Toggle Switch CSS */
-		.setting-row {
-			display: flex;
-			justify-content: space-between;
-			align-items: center;
-			padding: 10px 0 15px;
-			border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-		}
-		.setting-row:last-child { border-bottom: none; }
-		.setting-info {
-			display: flex;
-			flex-direction: column;
-			gap: 4px;
-		}
-		.setting-title { font-size: 13px; font-weight: 600; color: var(--vscode-foreground); }
-		.setting-desc { margin-top:4px;font-size: 11px; color: var(--vscode-descriptionForeground); max-width: 200px; line-height: 1.3; }
-		.switch {
-			position: relative;
-			display: inline-block;
-			width: 38px;
-			height: 20px;
-			flex-shrink: 0;
-		}
-		.switch input { opacity: 0; width: 0; height: 0; }
-		.slider {
-			position: absolute;
-			cursor: pointer;
-			top: 0; left: 0; right: 0; bottom: 0;
-			background-color: var(--vscode-settings-checkboxBackground, rgba(128,128,128,0.2));
-			border: 1px solid var(--vscode-settings-checkboxBorder, transparent);
-			transition: .15s;
-			border-radius: 20px;
-		}
-		.slider:before {
-			position: absolute;
-			content: "";
-			height: 14px;
-			width: 14px;
-			left: 2px;
-			bottom: 2px;
-			background-color: var(--vscode-settings-checkboxForeground, var(--vscode-foreground));
-			transition: .15s;
-			border-radius: 50%;
-			box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-		}
-		input:checked + .slider {
-			background-color: var(--vscode-button-background);
-			border-color: var(--vscode-button-border, transparent);
-		}
-		input:checked + .slider:before {
-			transform: translateX(18px);
-			background-color: var(--vscode-button-foreground);
-		}
-		.switch input:disabled + .slider {
-			opacity: 0.4;
-			cursor: not-allowed;
-		}
-		}
-		input:checked + .slider {
-			background-color: var(--memix-primary-color);
-		}
-		input:checked + .slider:before {
-			transform: translateX(14px);
-			background-color: var(--vscode-editor-background);
-		}
-		input:disabled + .slider { opacity: 0.5; cursor: not-allowed; }
+		${this.getTailwindCSS()}
 	</style>
 </head>
-<body>
-	<div id="loading-overlay" hidden>
-		<svg class="spinner" width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<body class="bg-[--vscode-sideBar-background] text-[--vscode-foreground] text-xs p-2">
+	<div id="loading-overlay" class="fixed top-0 left-0 w-full h-full flex flex-col items-center justify-center hidden" hidden>
+		<svg class="spinner mb-6" width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
 			<path d="M8 2a6 6 0 100 12A6 6 0 008 2z" stroke="currentColor" strokeWidth="1.5" stroke-dasharray="27 10" strokeLinecap="round"/>
 		</svg>
-		<div id="loading-text" style="font-size:12px;color:var(--vscode-foreground)">Connecting to Memix...</div>
+		<div id="loading-text" class="text-[--vscode-foreground]">Connecting to Memix...</div>
 	</div>
 
-
-	<div id="error-banner"></div>
+	<div id="error-banner" class="text-danger mb-3 hidden"></div>
 	<div id="hover-widget" class="hover-widget" hidden></div>
 	<div id="payload-modal-backdrop" class="modal-backdrop" hidden>
 		<div class="modal-shell" role="dialog" aria-modal="true" aria-labelledby="payload-modal-title">
@@ -1213,7 +722,7 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 			</div>
 			<div id="payload-modal-body" class="modal-body"></div>
 			<div class="modal-actions">
-				<button id="payload-modal-copy" class="action-btn secondary">Copy</button>
+				<button id="payload-modal-copy" class="action-btn">Copy</button>
 				<button id="payload-modal-done" class="action-btn">Done</button>
 			</div>
 		</div>
@@ -1225,8 +734,8 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 			<div id="empty-title" class="empty-title">Initialize Your Brain</div>
 			<div id="empty-sub" class="empty-sub">To use Memix, connect your Redis and initialize your brain for this workspace.</div>
 			<div style="display:flex;gap:8px;margin-top:10px;flex-direction:column;width:100%">
-				<button id="btn-empty-action" class="action-btn" style="width:100%;padding:10px">Initialize Brain</button>
-				<button id="btn-empty-resume" class="action-btn" style="width:100%;padding:10px;display:none">Wake Brain Up</button>
+				<button id="btn-empty-action" class="action-btn">Initialize Brain</button>
+				<button id="btn-empty-resume" class="action-btn">Wake Brain Up</button>
 			</div>
 		</div>
 	</div>
@@ -1237,56 +746,51 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 			<button id="tab-advanced" class="tab">Advanced <span id="advanced-badge" class="badge" style="display:none">0</span></button>
 			<button id="tab-settings" class="tab">Settings</button>
 		</div>
-
 		<div id="view-overview" class="view active">
-
-	<div class="card">
-		<h3>Brain Status</h3>
-		<div class="stat">
-			<span>Health</span>
-			<span id="health" class="stat-value">\u2014</span>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Brain Status</h3>
+				<div class="stat">
+					<span>Health</span>
+					<span id="health" class="stat-value">\u2014</span>
+				</div>
+				<div class="stat">
+					<span>Memix Size</span>
+					<span id="size" class="stat-value">\u2014</span>
+				</div>
+				<div class="stat" style="margin-top: 4px">
+					<span>Redis Dataset <button id="redis-max-edit" class="icon-btn" title="Set Redis max memory override">✎</button></span>
+					<span id="redis-size-text" class="stat-value">\u2014</span>
+				</div>
+				<div class="bar mb-2 mt-2"><div id="redis-size-bar" class="bar-fill" style="width:0%;background:#4ec9b0"></div></div>
+				<div class="stat">
+					<span>Keys</span>
+					<span id="keyCount" class="stat-value">\u2014</span>
+				</div>
+				<div class="stat">
+					<span>Session</span>
+					<span id="session" class="stat-value">\u2014</span>
+				</div>
+				<div class="stat">
+					<span>Last Updated</span>
+					<span id="lastUpdated" class="stat-value">\u2014</span>
+				</div>
+				<div class="stat">
+					<span>Current Task</span>
+					<span id="currentTask" class="stat-value" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">\u2014</span>
+				</div>
+			</div>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Memory Categories</h3>
+				<div id="categories"></div>
+			</div>
+			<div class="w-full py-8 px-3">
+				<h3 class="text-base font-semibold mb-2 w-full">Warnings</h3>
+				<div class="mt-2" id="warnings"><span>None</span></div>
+			</div>
 		</div>
-		<div class="stat">
-			<span>Memix Size</span>
-			<span id="size" class="stat-value">\u2014</span>
-		</div>
-		<div class="stat" style="margin-top: 4px">
-			<span>Redis Dataset <button id="redis-max-edit" class="icon-btn" title="Set Redis max memory override">✎</button></span>
-			<span id="redis-size-text" class="stat-value">\u2014</span>
-		</div>
-		<div class="bar" style="margin-top: 2px"><div id="redis-size-bar" class="bar-fill" style="width:0%;background:#4ec9b0"></div></div>
-		<div class="stat">
-			<span>Keys</span>
-			<span id="keyCount" class="stat-value">\u2014</span>
-		</div>
-		<div class="stat">
-			<span>Session</span>
-			<span id="session" class="stat-value">\u2014</span>
-		</div>
-		<div class="stat">
-			<span>Last Updated</span>
-			<span id="lastUpdated" class="stat-value">\u2014</span>
-		</div>
-		<div class="stat">
-			<span>Current Task</span>
-			<span id="currentTask" class="stat-value" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">\u2014</span>
-		</div>
-	</div>
-
-	<div class="card">
-		<h3>Memory Categories</h3>
-		<div id="categories"></div>
-	</div>
-
-	<div class="card">
-		<h3>Warnings</h3>
-		<div id="warnings"><span style="color:var(--vscode-descriptionForeground)">None</span></div>
-	</div>
-		</div>
-
 		<div id="view-advanced" class="view">
-			<div class="card">
-				<h3>Intelligence Metrics</h3>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Intelligence Metrics</h3>
 				<div class="stat">
 					<span>Decisions</span>
 					<span id="metric-decisions" class="stat-value">0</span>
@@ -1304,76 +808,88 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 					<span id="metric-warnings" class="stat-value">0</span>
 				</div>
 			</div>
-			
-			<div class="card">
-				<h3>Integrity & Freshness</h3>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Integrity & Freshness</h3>
 				<div class="stat">
 					<span>Required Keys</span>
 					<span id="required-keys-status" class="stat-value">—</span>
 				</div>
-				<div id="missing-required-keys" style="margin-top:2px"></div>
-				<div class="card-actions">
-					<button id="fix-missing-keys" class="action-btn secondary" hidden>Restore baseline keys</button>
+				<div class="mt-2 w-full flex items-start gap-x-2">
+					<div class="relative w-4 h-2 before:absolute before:top-0 before:left-0 before:bottom-0 before:w-[1px] before:bg-select after:absolute after:bottom-0 after:right-0 after:left-0 after:h-[1px] after:bg-select"></div>
+					<div id="missing-required-keys"></div>
+				</div>
+				<div class="w-full">
+					<button id="fix-missing-keys" class="action-btn w-full" hidden>Restore baseline keys</button>
 				</div>
 				<div class="stat">
 					<span>Staleness</span>
 					<span id="staleness" class="stat-value">—</span>
 				</div>
 			</div>
-			
-			<div class="card">
-				<h3 style="display:flex;justify-content:space-between">
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full flex items-center justify-between">
 					<span>Missing/Pending Tasks</span>
-					<span id="pending-tasks-count">0</span>
+					<span class="text-sm font-normal" id="pending-tasks-count">0</span>
 				</h3>
 				<div id="pending-tasks-container">
 					<span>No pending tasks</span>
 				</div>
 			</div>
-
-			<div class="card">
-				<h3 style="display:flex;justify-content:space-between">
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full flex items-center justify-between">
 					<span>Session Log</span>
-					<span id="session-log-count">0</span>
+					<span class="text-sm font-normal" id="session-log-count">0</span>
 				</h3>
 				<div id="session-log-preview">No entries</div>
 			</div>
-
-			<div class="card">
-				<h3 style="display:flex;justify-content:space-between">
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full flex items-center justify-between">
 					<span>Daemon Timeline</span>
-					<span id="session-timeline-count">0</span>
+					<span class="text-sm font-normal" id="session-timeline-count">0</span>
 				</h3>
 				<div id="session-timeline-preview">No events</div>
 			</div>
-
-			<div class="card">
-				<h3>Observer Code DNA</h3>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Observer Code DNA</h3>
 				<div class="stat">
 					<span>Architecture</span>
 					<span id="observer-dna-architecture" class="stat-value">—</span>
 				</div>
 				<div class="stat">
+					<span>Files</span>
+					<span id="observer-dna-files" class="stat-value">—</span>
+				</div>
+				<div class="stat">
+					<span>Symbols</span>
+					<span id="observer-dna-symbols" class="stat-value">—</span>
+				</div>
+				<div class="stat">
+					<span>Depth</span>
+					<span id="observer-dna-depth" class="stat-value">—</span>
+				</div>
+				<div class="stat">
 					<span>Complexity Score</span>
 					<span id="observer-dna-complexity" class="stat-value">—</span>
 				</div>
-				<div id="observer-dna-summary" style="margin-top:6px;color:var(--vscode-descriptionForeground)">No DNA snapshot</div>
+				<div class="stat">
+					<span>Typed</span>
+					<span id="observer-dna-typed" class="stat-value">—</span>
+				</div>
+				<div id="observer-dna-explainability" style="margin-top:6px;color:var(--vscode-descriptionForeground)">No DNA snapshot</div>
 				<div id="observer-dna-patterns" style="margin-top:6px"></div>
 				<div id="observer-dna-hot-zones" style="margin-top:6px"></div>
 				<div id="observer-dna-stable-zones" style="margin-top:6px"></div>
 			</div>
-
-			<div class="card">
-				<h3>Observer DNA OTel Export</h3>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Observer DNA OTel Export</h3>
 				<div id="observer-dna-otel-summary" class="summary-row">No OTel export</div>
-				<div class="card-actions">
-					<button id="observer-dna-otel-open" class="action-btn secondary">View export</button>
-					<button id="observer-dna-otel-copy" class="action-btn secondary">Copy JSON</button>
+				<div class="flex items-center gap-x-2 mt-2">
+					<button id="observer-dna-otel-open" class="action-btn w-full">View JSON</button>
+					<button id="observer-dna-otel-copy" class="action-btn w-full">Copy OTel</button>
 				</div>
 			</div>
-
-			<div class="card">
-				<h3>Predictive Intent</h3>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Predictive Intent</h3>
 				<div class="stat">
 					<span>Intent</span>
 					<span id="observer-intent-type" class="stat-value">—</span>
@@ -1385,9 +901,8 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				<div id="observer-intent-related-files" style="margin-top:6px;color:var(--vscode-descriptionForeground)">No predictive snapshot</div>
 				<div id="observer-intent-rationale" style="margin-top:6px"></div>
 			</div>
-
-			<div class="card">
-				<h3>Git Archaeology</h3>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Git Archaeology</h3>
 				<div class="stat">
 					<span>Repo Root</span>
 					<span id="observer-git-repo" class="stat-value" style="font-weight:normal;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</span>
@@ -1395,82 +910,70 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				<div id="observer-git-authors" style="margin-top:6px;color:var(--vscode-descriptionForeground)">No archaeology snapshot</div>
 				<div id="observer-git-hot-files" style="margin-top:6px"></div>
 			</div>
-
-			<div class="card">
-				<h3>Daemon Agents</h3>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Daemon Agents</h3>
 				<div id="agent-config-summary" style="color:var(--vscode-descriptionForeground)">No agent runtime data</div>
 				<div id="agent-reports-summary" style="margin-top:6px"></div>
 			</div>
-
-			<div class="card">
-				<h3>Compiled Context</h3>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Compiled Context</h3>
 				<div id="compiled-context-summary" style="color:var(--vscode-descriptionForeground)">No compiled context</div>
 				<div id="compiled-context-sections" style="margin-top:6px"></div>
 			</div>
-
-			<div class="card">
-				<h3>Proactive Risk</h3>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Proactive Risk</h3>
 				<div id="proactive-risk-summary" style="color:var(--vscode-descriptionForeground)">No risk signal</div>
 				<div id="proactive-risk-details" style="margin-top:6px"></div>
 			</div>
-
-			<div class="card">
-				<h3>Learning Layer</h3>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Learning Layer</h3>
 				<div id="prompt-optimization-summary" style="color:var(--vscode-descriptionForeground)">No learning data</div>
 				<div id="model-performance-summary" style="margin-top:6px"></div>
 				<div id="developer-profile-summary" style="margin-top:6px"></div>
 			</div>
-
-			<div class="card">
-				<h3>Hierarchy Resolution</h3>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Hierarchy Resolution</h3>
 				<div id="hierarchy-resolution-summary" style="color:var(--vscode-descriptionForeground)">No hierarchy resolution</div>
-				<div class="card-actions">
-					<button id="hierarchy-resolution-open" class="action-btn secondary">View JSON</button>
+				<div style="margin-top: 8px; width: 100%;">
+					<button id="hierarchy-resolution-open" class="action-btn w-full">View JSON</button>
 				</div>
 			</div>
-
-			<div class="card">
-				<h3>IDE Rules Output</h3>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">IDE Rules Output</h3>
 				<div class="stat">
 					<span>IDE</span>
 					<span id="ide" class="stat-value">—</span>
 				</div>
 				<div class="stat">
 					<span>Rules Path</span>
-					<span id="rules-path" class="stat-value" style="font-weight:normal;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</span>
+					<span id="rules-path" class="stat-value" title="" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</span>
 				</div>
 			</div>
-
-			<div class="card">
-				<h3>Top Memory Vectors (Size)</h3>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Top Memory Vectors (Size)</h3>
 				<div id="key-sizes" class="key-table"></div>
 			</div>
-
-			<div class="card">
-				<h3>Brain Key Coverage</h3>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Brain Key Coverage</h3>
 				<div id="key-coverage" class="key-table"></div>
 			</div>
-
-			<div class="card">
-				<h3 style="display:flex;justify-content:space-between;align-items:center">
-					<span>Prompt Pack</span>
-					<span style="display:flex;gap:6px;align-items:center">
-						<select id="prompt-pack-variant" class="select" aria-label="Prompt Pack Variant">
-							<option value="Small">Small</option>
-							<option value="Standard" selected>Standard</option>
-							<option value="Deep">Deep</option>
-						</select>
-						<button id="view-prompt-pack" class="action-btn secondary">View</button>
-					</span>
-				</h3>
-				<div id="prompt-pack-summary" class="summary-row">Prompt Pack unavailable</div>
-				<div id="prompt-pack-meta" style="margin-bottom:6px;color:var(--vscode-descriptionForeground)">tokens: —</div>
+			<div class="w-full py-8 px-3">
+				<h3 class="text-base font-semibold mb-2 w-full">Prompt Pack</h3>
+				<div id="prompt-pack-meta" class="mb-4">Tokens: —</div>
+				<div class="flex items-center gap-x-2">
+					<select id="prompt-pack-variant" class="w-full bg-select border pl-2 pr-4 py-1.5 border-0 focus:ring-0 focus:outline-none rounded-none" aria-label="Prompt Pack Variant">
+						<option value="Small">Small</option>
+						<option value="Standard" selected>Standard</option>
+						<option value="Deep">Deep</option>
+					</select>
+					<button id="view-prompt-pack" class="w-full action-btn">View</button>
+				</div>
+				<div id="prompt-pack-summary" class="mt-4 summary-row">Prompt Pack unavailable</div>
 			</div>
 		</div>
-
 		<div id="view-settings" class="view">
-			<div class="card">
-				<h3>Global Control</h3>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Global Control</h3>
 				<div class="setting-row">
 					<div class="setting-info">
 						<div class="setting-title">Pause Brain</div>
@@ -1482,11 +985,10 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 					</label>
 				</div>
 			</div>
-
-			<div class="card" id="settings-config-info">
-				<h3>Config</h3>
+			<div class="w-full py-8 px-3" id="settings-config-info">
+				<h3 class="text-base font-semibold mb-2 w-full">Config</h3>
 				<div class="setting-row" style="border:none;padding:4px 0">
-					<span id="settings-config-path" class="stat-value" style="font-size:10px;font-weight:200">—</span>
+					<span id="settings-config-path" class="stat-value">—</span>
 				</div>
 			</div>
 		</div>
@@ -1826,7 +1328,7 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 						var pps = byId('prompt-pack-summary');
 						if (pps) pps.textContent = 'Updating Prompt Pack...';
 						var ppm = byId('prompt-pack-meta');
-						if (ppm) ppm.textContent = 'tokens: recalculating...';
+						if (ppm) ppm.textContent = 'Tokens: Recalculating...';
 						send('setPromptPackVariant', { showSpinner: true }, { variant: v });
 					}
 				});
@@ -2083,17 +1585,17 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				var missingEl = byId('missing-required-keys');
 				var fixBtn = byId('fix-missing-keys');
 				if (requiredEl && missingEl) {
-				if (missing.length === 0) {
-					requiredEl.textContent = 'OK';
-					requiredEl.style.color = '#4ec9b0';
-					missingEl.innerHTML = '<span style="color:#4ec9b0">All required keys present</span>';
-					if (fixBtn) fixBtn.hidden = true;
-				} else {
-					requiredEl.textContent = 'Missing ' + missing.length;
-					requiredEl.style.color = '#f44747';
-					missingEl.innerHTML = '<div style="color:#f44747">Missing required keys: ' + missing.map(escapeHtml).join(', ') + '</div>';
-					if (fixBtn) fixBtn.hidden = false;
-				}
+					if (missing.length === 0) {
+						requiredEl.textContent = 'OK';
+						missingEl.textContent = 'All required keys present';
+						missingEl.style.color = '#4ec9b0';
+						if (fixBtn) fixBtn.hidden = true;
+					} else {
+						requiredEl.textContent = 'Missing ' + missing.length;
+						missingEl.textContent = 'Missing required keys: ' + missing.map(escapeHtml).join(', ');
+						missingEl.style.color = '#f44747';
+						if (fixBtn) fixBtn.hidden = false;
+					}
 				}
 
 				var stalenessEl = byId('staleness');
@@ -2118,7 +1620,7 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				for (var name in cats) {
 					var info = cats[name];
 					var kb = (info.size / 1024).toFixed(1);
-					catHtml += '<div class="category"><div class="category-name">' + name + ' <span>' + kb + ' KB</span></div><div style="margin-top:3px;color:var(--vscode-descriptionForeground);font-size:11px;">' + info.keys.join(', ') + '</div></div>';
+					catHtml += '<div class="w-full py-0.5"><div class="stat">' + name + ' <span>' + kb + ' KB</span></div><div class="text-[11px] opacity-50">' + info.keys.join(', ') + '</div></div>';
 				}
 				var categoriesEl = byId('categories');
 				if (categoriesEl) categoriesEl.innerHTML = catHtml || '<span style="color:var(--vscode-descriptionForeground)">No data</span>';
@@ -2129,7 +1631,7 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				for (var i = 0; i < sorted.length; i++) {
 					var k = sorted[i];
 					var bytes = keys[k] || 0;
-					keySizesHtml += '<div class="k">' + k + '</div><div>' + (bytes / 1024).toFixed(1) + ' KB</div>';
+					keySizesHtml += '<div class="stat"><span style="max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + k + '</span><span>' + (bytes / 1024).toFixed(1) + ' KB</span></div>';
 				}
 				var keySizesEl = byId('key-sizes');
 				if (keySizesEl) keySizesEl.innerHTML = keySizesHtml || '<span style="color:var(--vscode-descriptionForeground)">No data</span>';
@@ -2148,7 +1650,10 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				var ideEl = byId('ide');
 				if (ideEl) ideEl.textContent = (data.ide || '').toUpperCase();
 				var rulesPathEl = byId('rules-path');
-				if (rulesPathEl) rulesPathEl.textContent = (data.rulesDir || '') + '/' + (data.rulesFile || '');
+				if (rulesPathEl) {
+					rulesPathEl.textContent = (data.rulesDir || '') + '/' + (data.rulesFile || '');
+					rulesPathEl.title = (data.rulesDir || '') + '/' + (data.rulesFile || '');
+				}
 
 				if (Array.isArray(data.keyCoverage)) {
 					var rows = data.keyCoverage.map(function(r) {
@@ -2164,11 +1669,11 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 						}
 						var label = escapeHtml(r.label || r.key);
 						var tooltip = r.description ? ' data-tooltip="' + escapeHtml(r.description) + '" aria-label="' + escapeHtml(r.description) + '" tabindex="0"' : '';
-						var icon = r.description ? '<span class="info-icon"' + tooltip + '><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.25 7c0 .69-.56 1.25-1.25 1.25s-1.25-.56-1.25-1.25.56-1.25 1.25-1.25 1.25.56 1.25 1.25zm10.75 5c0 6.627-5.373 12-12 12s-12-5.373-12-12 5.373-12 12-12 12 5.373 12 12zm-2 0c0-5.514-4.486-10-10-10s-10 4.486-10 10 4.486 10 10 10 10-4.486 10-10zm-13-2v2h2v6h2v-8h-4z"/></svg></span>' : '';
-						return '<div class="k"><span class="key-label">' + label + icon + '</span></div><div style="text-align:right;">' + status + '</div>';
+						var icon = r.description ? '<span class="ml-2 info-icon"' + tooltip + '><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.25 7c0 .69-.56 1.25-1.25 1.25s-1.25-.56-1.25-1.25.56-1.25 1.25-1.25 1.25.56 1.25 1.25zm10.75 5c0 6.627-5.373 12-12 12s-12-5.373-12-12 5.373-12 12-12 12 5.373 12 12zm-2 0c0-5.514-4.486-10-10-10s-10 4.486-10 10 4.486 10 10 10 10-4.486 10-10zm-13-2v2h2v6h2v-8h-4z"/></svg></span>' : '';
+						return '<div class="stat"><span style="max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + label + icon + '</span><span>' + status + '</span></div>';
 					}).join('');
 					var kc = byId('key-coverage');
-					if (kc) kc.innerHTML = rows || '<div class="k">—</div><div>—</div>';
+					if (kc) kc.innerHTML = rows || '<div class="stat"><span>—</span><span>—</span></div>';
 				}
 
 				if (typeof data.promptPack === 'string') {
@@ -2185,7 +1690,7 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 							'<div style="margin-top:4px"><strong>' + observerSectionCount + '</strong> observer intelligence sections included.</div>' +
 							missingLine;
 					}
-					var tok = (typeof data.promptPackTokens === 'number') ? (data.promptPackTokens + ' tokens') : 'tokens: —';
+					var tok = (typeof data.promptPackTokens === 'number') ? (data.promptPackTokens + ' tokens') : 'Tokens: —';
 					var ppm = byId('prompt-pack-meta');
 					if (ppm) ppm.textContent = tok;
 				}
@@ -2209,13 +1714,13 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				}
 				var prev = data.sessionLogPreview || [];
 				if (prev.length === 0) {
-					slPrev.textContent = 'No entries';
+					slPrev.innerHTML = '<span style="color:var(--vscode-descriptionForeground)">No entries</span>';
 				} else {
 					var pHtml = '';
 					for (var pi = 0; pi < prev.length; pi++) {
 						var dt = prev[pi].date || '';
 						var sm = prev[pi].summary || '';
-						pHtml += '<div style="margin-bottom:6px"><div style="font-size:10px;opacity:0.8">' + dt + '</div><div style="font-size:11px;line-height:1.3">' + sm + '</div></div>';
+						pHtml += '<div class="mb-2"><div class="opacity-50">' + dt + '</div><div class="text-sm">' + sm + '</div></div>';
 					}
 					slPrev.innerHTML = pHtml;
 				}
@@ -2226,13 +1731,13 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				if (stPrev) {
 					var timeline = data.sessionTimelinePreview || [];
 					if (timeline.length === 0) {
-						stPrev.textContent = 'No events';
+						stPrev.innerHTML = '<span style="color:var(--vscode-descriptionForeground)">No events</span>';
 					} else {
 						var tHtml = '';
 						for (var ti = 0; ti < timeline.length; ti++) {
 							var tts = timeline[ti].timestamp || '';
 							var tev = timeline[ti].event || '';
-							tHtml += '<div style="margin-bottom:6px"><div style="font-size:10px;opacity:0.8">' + tts + '</div><div style="font-size:11px;line-height:1.3">' + tev + '</div></div>';
+							tHtml += '<div class="mb-2"><div class="opacity-50">' + tts + '</div><div class="text-sm">' + tev + '</div></div>';
 						}
 						stPrev.innerHTML = tHtml;
 					}
@@ -2247,16 +1752,22 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 						? Math.round(dna.complexity_score * 100) + '%'
 						: '—';
 				}
-				var dnaSummary = byId('observer-dna-summary');
-				if (dnaSummary) {
+				var dnaFiles = byId('observer-dna-files');
+				if (dnaFiles) dnaFiles.textContent = dna && typeof dna.indexed_files === 'number' ? dna.indexed_files : '—';
+				var dnaSymbols = byId('observer-dna-symbols');
+				if (dnaSymbols) dnaSymbols.textContent = dna && typeof dna.functions_indexed === 'number' ? dna.functions_indexed : '—';
+				var dnaDepth = byId('observer-dna-depth');
+				if (dnaDepth) dnaDepth.textContent = dna && typeof dna.dependency_depth === 'number' ? dna.dependency_depth : '—';
+				var dnaTyped = byId('observer-dna-typed');
+				if (dnaTyped) dnaTyped.textContent = dna && typeof dna.type_coverage === 'number' ? Math.round(dna.type_coverage * 100) + '%' : '—';
+				
+				var dnaExplain = byId('observer-dna-explainability');
+				if (dnaExplain) {
 					if (dna && typeof dna.indexed_files === 'number') {
-						var complexityPct = typeof dna.complexity_score === 'number' ? Math.round(dna.complexity_score * 100) : 0;
-						var typePct = typeof dna.type_coverage === 'number' ? Math.round(dna.type_coverage * 100) : 0;
-						var summaryLine = dna.indexed_files + ' files • ' + (dna.functions_indexed || 0) + ' symbols • depth ' + (dna.dependency_depth || 0) + ' • complexity ' + complexityPct + '% • typed ' + typePct + '%';
 						var explanation = typeof dna.explainability_summary === 'string' ? dna.explainability_summary : '';
-						dnaSummary.innerHTML = '<div>' + summaryLine + '</div>' + (explanation ? '<div style="margin-top:6px;font-size:11px;line-height:1.4"><b>Explainability:</b> ' + explanation + '</div>' : '');
+						dnaExplain.innerHTML = explanation ? '<div style="font-size:11px;line-height:1.4"><b>Explainability:</b> ' + explanation + '</div>' : '';
 					} else {
-						dnaSummary.textContent = 'No DNA snapshot';
+						dnaExplain.textContent = 'No DNA snapshot';
 					}
 				}
 				var dnaPatterns = byId('observer-dna-patterns');
@@ -2399,9 +1910,10 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				var compiledSummary = byId('compiled-context-summary');
 				if (compiledSummary) {
 					if (compiled && typeof compiled.total_tokens === 'number') {
-						compiledSummary.innerHTML = '<div><b>' + (data.activeFile || 'Active file unavailable') + '</b></div>' +
-							'<div style="margin-top:4px">task=' + (data.inferredTaskType || 'unknown') + ' • ' + compiled.total_tokens + '/' + compiled.budget + ' tokens</div>' +
-							'<div style="margin-top:4px;font-size:11px;line-height:1.4">' + (compiled.explainability_summary || '') + '</div>';
+						compiledSummary.innerHTML = '<div>' + (data.activeFile || 'Active file unavailable') + '</div>' +
+							'<div class="stat mt-1"><span>Task</span>' + '<span class="capitalize">' + ((data.inferredTaskType || '').replace(/_/g, ' ') || 'unknown') + '</span></div>' + 
+							'<div class="stat"><span>Tokens/Budget</span>' + '<span>' + compiled.total_tokens + '/' + compiled.budget + '</span></div>' +
+							'<div class="mb-2 mt-1" style="color:var(--vscode-descriptionForeground)">' + (compiled.explainability_summary || '') + '</div>';
 					} else {
 						compiledSummary.textContent = 'No compiled context';
 					}
@@ -2410,9 +1922,9 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				if (compiledSections) {
 					var sections = compiled && Array.isArray(compiled.selected_sections) ? compiled.selected_sections : [];
 					compiledSections.innerHTML = sections.length > 0
-						? '<div style="font-size:11px;line-height:1.4"><b>Selected sections:</b><br/>' + sections.slice(0, 5).map(function(section) {
-							return section.kind + ' • ' + section.tokens + ' tokens';
-						}).join('<br/>') + '</div>'
+						? '<div><b>Selected sections:</b></div>' + sections.slice(0, 5).map(function(section) {
+							return '<div class="stat"><span class="capitalize">' + section.kind + '</span>' + '<span>' + section.tokens + ' tokens</span></div>';
+						}).join('')
 						: '<div style="color:var(--vscode-descriptionForeground)">No selected sections</div>';
 				}
 
@@ -2421,7 +1933,10 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				if (riskSummary) {
 					if (risk && typeof risk.risk_score === 'number') {
 						var riskPct = Math.round(risk.risk_score * 100);
-						riskSummary.innerHTML = '<div><b>' + risk.file + '</b></div><div style="margin-top:4px">risk ' + riskPct + '% • dependents ' + (risk.dependents || 0) + '</div><div style="margin-top:4px">' + (risk.recommendation || '') + '</div>';
+						riskSummary.innerHTML = '<div>' + risk.file + '</div>' + 
+							'<div class="stat"><span>Risk</span>' + '<span>' + riskPct + '%</span></div>' + 
+							'<div class="stat"><span>Dependents</span>' + '<span>' + (risk.dependents || 0) + '</span></div>' + 
+							'<div class="mt-2" style="color:var(--vscode-descriptionForeground)">' + (risk.recommendation || '') + '</div>';
 					} else {
 						riskSummary.textContent = 'No risk signal';
 					}
@@ -2446,9 +1961,9 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				var promptOptEl = byId('prompt-optimization-summary');
 				if (promptOptEl) {
 					if (promptOpt && typeof promptOpt.recommended_budget === 'number') {
-						promptOptEl.innerHTML = '<div><b>Task:</b> ' + (promptOpt.task_type || data.inferredTaskType || 'unknown') + '</div>' +
-							'<div style="margin-top:4px">recommended budget ' + promptOpt.recommended_budget + ' tokens</div>' +
-							'<div style="margin-top:4px;font-size:11px;line-height:1.4"><b>Always include:</b> ' + ((promptOpt.always_include || []).join(', ') || '—') + '</div>';
+						promptOptEl.innerHTML = '<div class="stat"><span>Task</span>' + '<span>' + ((promptOpt.task_type || '').replace(/_/g, ' ') || (data.inferredTaskType || '').replace(/_/g, ' ') || 'unknown') + '</span></div>' + 
+							'<div class="stat"><span>Recommended budget</span>' + '<span>' + promptOpt.recommended_budget + ' tokens</span></div>' + 
+							'<div class="mt-2" style="color:var(--vscode-descriptionForeground)">' + (promptOpt.always_include || []).join(', ') + '</div>';
 					} else {
 						promptOptEl.textContent = 'No learning data';
 					}
@@ -2463,7 +1978,15 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 						for (var taskName in tasksPerf) {
 							if (!Object.prototype.hasOwnProperty.call(tasksPerf, taskName)) continue;
 							var tp = tasksPerf[taskName] || {};
-							perfLines.push(model + ' • ' + taskName + ' • ' + Math.round((tp.first_try_rate || 0) * 100) + '% first-try • ' + (tp.runs || 0) + ' runs');
+							perfLines.push(
+							'<div class="w-full">' +
+							'<div class="capitalize text-base font-semibold mb-2">' + (model || 'unknown') + '</div>' +
+							'<ul class="pl-5">' +
+							'<li class="stat"><span>Task</span>' + '<span>' + (taskName || 'unknown') + '</span></li>' +
+							'<li class="stat"><span>First-try rate</span>' + '<span>' + Math.round((tp.first_try_rate || 0) * 100) + '%</span></li>' +
+							'<li class="stat"><span>Runs</span>' + '<span>' + (tp.runs || 0) + '</span></li>' +
+							'<ul>' +
+							'</div>');
 						}
 					}
 					modelPerfEl.innerHTML = perfLines.length > 0
@@ -2503,11 +2026,11 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 						tBadge.textContent = tasks.length;
 					}
 					var tHtml = '';
-					for (var j = 0; j < Math.min(tasks.length, 5); j++) {
+					for (var j = 0; j < Math.min(tasks.length, 10); j++) {
 						var title = typeof tasks[j] === 'string' ? tasks[j] : (tasks[j].title || tasks[j].task || 'Unknown task');
 						tHtml += '<div class="task-item"><div class="task-bullet">●</div><div>' + title + '</div></div>';
 					}
-					if (tasks.length > 5) tHtml += '<div style="margin-top:4px;color:var(--vscode-descriptionForeground);font-size:10px">+' + (tasks.length - 5) + ' more tasks...</div>';
+					if (tasks.length > 10) tHtml += '<div class="text-[11px] mt-2" style="color:var(--vscode-descriptionForeground);">+' + (tasks.length - 5) + ' more tasks...</div>';
 					var pendingContainerEl = byId('pending-tasks-container');
 					if (pendingContainerEl) pendingContainerEl.innerHTML = tHtml;
 				} else {
