@@ -305,6 +305,59 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				case 'refreshSettings':
 					await this.refreshSettings();
 					break;
+				case 'openBrainKey': {
+					if (typeof msg.key === 'string' && this.workspaceRoot) {
+						const path = require('path');
+						const brainDir = path.join(this.workspaceRoot, '.memix', 'brain');
+						// Normalize key to filename: session:state → session_state.json
+						const fileName = msg.key.replace(/:/g, '_') + '.json';
+						const filePath = path.join(brainDir, fileName);
+						try {
+							const uri = vscode.Uri.file(filePath);
+							const doc = await vscode.workspace.openTextDocument(uri);
+							await vscode.window.showTextDocument(doc, { preview: true });
+						} catch {
+							vscode.window.showWarningMessage(`Brain key file not found: ${fileName}`);
+						}
+					}
+					break;
+				}
+				case 'showVersionInfo': {
+					try {
+						const path = require('path');
+						const fs = require('fs');
+						const versionsPath = path.join(this.extensionUri.fsPath, '..', 'versions.json');
+						let daemonVer = 'unknown';
+						let extensionVer = 'unknown';
+						let lastModified = '';
+						try {
+							const raw = fs.readFileSync(versionsPath, 'utf8');
+							const v = JSON.parse(raw);
+							daemonVer = v.daemonVersion || 'unknown';
+							extensionVer = v.extensionVersion || 'unknown';
+							const stat = fs.statSync(versionsPath);
+							const diffMs = Date.now() - new Date(stat.mtime).getTime();
+							const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+							if (days === 0) lastModified = 'today';
+							else if (days === 1) lastModified = '1 day ago';
+							else if (days < 30) lastModified = `${days} days ago`;
+							else if (days < 365) lastModified = `${Math.floor(days / 30)} months ago`;
+							else lastModified = `${Math.floor(days / 365)} years ago`;
+						} catch {
+							// Try reading from package.json as fallback
+							try {
+								const pkgPath = path.join(this.extensionUri.fsPath, 'package.json');
+								const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+								extensionVer = pkg.version || 'unknown';
+							} catch { /* ignore */ }
+						}
+						const detail = `Daemon: v${daemonVer}\nExtension: v${extensionVer}${lastModified ? `\nLast updated: ${lastModified}` : ''}`;
+						vscode.window.showInformationMessage(`Memix Version Info`, { modal: true, detail });
+					} catch (e) {
+						vscode.window.showErrorMessage(`Failed to read version info: ${e}`);
+					}
+					break;
+				}
 
 			}
 		});
@@ -985,6 +1038,26 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 					</label>
 				</div>
 			</div>
+                        <div class="w-full py-8 px-3 border-b border-bottom">
+                            <h3 class="text-base font-semibold mb-2 w-full">Redis Connection</h3>
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-title">Change Redis URL</div>
+                                    <div class="setting-desc">Switch to a different Redis instance. The current URL is saved securely in your OS keychain.</div>
+                                </div>
+                                <button id="btn-change-redis" class="action-btn" style="white-space:nowrap">Change</button>
+                            </div>
+                        </div>
+                        <div class="w-full py-8 px-3 border-b border-bottom">
+                            <h3 class="text-base font-semibold mb-2 w-full">Version</h3>
+                            <div class="setting-row">
+                                <div class="setting-info">
+                                    <div class="setting-title">Current Version</div>
+                                    <div class="setting-desc">Shows installed Memix daemon and extension versions.</div>
+                                </div>
+                                <button id="btn-version-info" class="action-btn" style="white-space:nowrap">View</button>
+                            </div>
+                        </div>
 			<div class="w-full py-8 px-3" id="settings-config-info">
 				<h3 class="text-base font-semibold mb-2 w-full">Config</h3>
 				<div class="setting-row" style="border:none;padding:4px 0">
@@ -1406,6 +1479,20 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				});
 			}
 
+			var btnChangeRedis = byId('btn-change-redis');
+			if (btnChangeRedis) {
+				btnChangeRedis.addEventListener('click', function() {
+					send('connectRedis', { showSpinner: true });
+				});
+			}
+
+			var btnVersionInfo = byId('btn-version-info');
+			if (btnVersionInfo) {
+				btnVersionInfo.addEventListener('click', function() {
+					vscode.postMessage({ command: 'showVersionInfo' });
+				});
+			}
+
 			// Settings Toggles
 			var tBrainPause = byId('toggle-brain-pause');
 			
@@ -1631,10 +1718,24 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				for (var i = 0; i < sorted.length; i++) {
 					var k = sorted[i];
 					var bytes = keys[k] || 0;
-					keySizesHtml += '<div class="stat"><span style="max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + k + '</span><span>' + (bytes / 1024).toFixed(1) + ' KB</span></div>';
+					keySizesHtml += '<div class="stat"><a class="brain-key-link" data-key="' + escapeHtml(k) + '" href="#" title="Open ' + escapeHtml(k) + '.json" style="max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--vscode-textLink-foreground);cursor:pointer;text-decoration:none">' + escapeHtml(k) + '</a><span>' + (bytes / 1024).toFixed(1) + ' KB</span></div>';
 				}
 				var keySizesEl = byId('key-sizes');
-				if (keySizesEl) keySizesEl.innerHTML = keySizesHtml || '<span style="color:var(--vscode-descriptionForeground)">No data</span>';
+				if (keySizesEl) {
+					keySizesEl.innerHTML = keySizesHtml || '<span style="color:var(--vscode-descriptionForeground)">No data</span>';
+					keySizesEl.addEventListener('click', function(e) {
+						var target = e.target;
+						while (target && target !== keySizesEl) {
+							if (target.classList && target.classList.contains('brain-key-link')) {
+								e.preventDefault();
+								var keyName = target.getAttribute('data-key');
+								if (keyName) vscode.postMessage({ command: 'openBrainKey', key: keyName });
+								return;
+							}
+							target = target.parentNode;
+						}
+					});
+				}
 
 				if (data.metrics) {
 					var md = byId('metric-decisions');
