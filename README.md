@@ -96,6 +96,9 @@ Memix compiles a task-focused context packet from the active file, recent histor
 ### AGENTS Runtime (daemon)
 `AGENTS.md` now drives daemon-side autonomous agents that run independently of the chat model. Memix can parse agent definitions, execute supported triggers, and persist agent reports for later AI or developer consumption.
 
+### Code Skeleton Index & CallGraph
+Maintains a live structural map of your code: File Skeleton Index (FSI) for per-file architecture, and Function Symbol Index (FuSI) detailing function calls and callers. An in-memory CallGraph natively powers these structural queries, seamlessly injected into the context compiler so the AI understands execution flow automatically.
+
 ### Proactive Risk Analysis + Configurable Security Scanner
 Before risky edits, Memix scores a file using dependents, known issues, past breakage signals, and stability indicators. The built-in security scanner loads configurable rules from `memix-security.toml` (10 default rules across critical/warning/info severity).
 

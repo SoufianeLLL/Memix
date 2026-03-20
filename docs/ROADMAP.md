@@ -61,6 +61,17 @@
 
 ---
 
+## Released — v1.0.7-beta (Structural Intelligence & Code Skeleton Index)
+
+- ✅ **Code Skeleton Index (FSI/FuSI)**: Live structural map of the codebase. File Skeleton Index gives per-file architecture summaries, Function Symbol Index gives per-function call/caller details. Stored in an isolated Redis hash with LRU eviction.
+- ✅ **CallGraph Engine**: In-memory call graph rebuilt in real-time, powering queries for `calls_from` / `callers_of`.
+- ✅ **Skeleton-Aware Context Compiler**: FSI and FuSI structural context now compete fairly with other sources via DP knapsack budget fitting.
+- ✅ **Environment-Driven Safeguards**: Configurable safeguards for skeleton limits via `.env` with `MEMIX_*` prefix.
+- ✅ **Redis Connection Pooling**: `ConnectionManager` prevents Redis connection exhaustion on cloud instances.
+- ✅ **Panel UX Improvements**: Clickable memory vectors, current version modal, and "Change Redis URL" flow added to the debug panel.
+
+---
+
 ## Near-Term
 
 ### Multi-Project Daemon (Priority)

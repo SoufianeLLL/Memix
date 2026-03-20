@@ -4,6 +4,29 @@ All notable changes to the "memix" extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [1.0.7-beta] - 2026-03-20 (Code Skeleton Index + Panel Enhancements)
+### Features
+- **Code Skeleton Index (FSI/FuSI)**: Live structural map of the codebase — File Skeleton Index gives per-file architecture summaries, Function Symbol Index gives per-function call/caller details. Stored in an isolated Redis hash with LRU eviction (separate from brain entries).
+- **CallGraph Engine**: In-memory call graph rebuilt incrementally on file saves, powering the FuSI layer with `calls_from` / `callers_of` queries.
+- **Skeleton-Aware Context Compiler**: FSI sections injected at priority 85, FuSI at priority 78 into the context compilation pipeline. Structural context now competes fairly with other sources in the DP knapsack budget fitting.
+- **Skeleton Stats API**: `GET /api/v1/skeleton/stats/:project_id` returns FSI, FuSI, and total counts.
+
+### Configuration
+- **Environment-Driven Safeguards**: All skeleton limits (`MAX_FUNCTIONS_PER_FILE`, `MAX_TYPES_PER_FILE`, `MAX_IMPORTS_PER_FILE`, `MAX_DEPS_PER_FILE`, `MAX_HOT_FILES`, `MAX_SYMBOLS_PER_HOT_FILE`, `MAX_SKELETON_ENTRIES`, `FSI_DEBOUNCE_SECS`) are now configurable via `.env` with `MEMIX_*` prefix and safe fallback defaults.
+- **Redis Connection Pooling**: Daemon now uses a single multiplexed `ConnectionManager` instead of per-request connections, preventing Redis connection exhaustion on cloud instances.
+
+### UX
+- **Clickable Memory Vectors**: Keys in "Top Memory Vectors (Size)" are now clickable links that open the corresponding brain JSON file in the editor.
+- **Version Info**: New "Current Version" button in Settings shows daemon and extension versions with last-updated time.
+- **Change Redis URL**: New setting in the Settings tab to switch Redis accounts without re-initializing.
+
+### Documentation
+- Added `docs/CODE_SKELETON_INDEX.md` — FSI/FuSI architecture, data flow, token budget math.
+- Added `docs/CONTEXT_COMPILER.md` — 7-pass compilation pipeline, priorities, metrics.
+- Added `docs/CALL_GRAPH.md` — In-memory call graph design and query API.
+- Added `docs/REDIS_CONNECTION_POOLING.md` — ConnectionManager architecture.
+- Added `docs/DAEMON_DEVELOPMENT.md` — Development guide, setup, common issues.
+
 ## [1.0.0-beta.5] - 2026-03-10 (Daemon Intelligence Layer + Advanced Panel UX)
 ### Features
 - **AGENTS Runtime**: Added daemon-side `AGENTS.md` parsing and runtime execution for supported triggers, with persisted agent reports and config/report APIs.
