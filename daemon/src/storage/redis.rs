@@ -23,6 +23,7 @@ static MODEL_ONNX: &[u8] = include_bytes!("../../models/all-MiniLM-L6-v2/onnx/mo
 
 pub struct RedisStorage {
 	_client: redis::Client,
+	manager: tokio::sync::RwLock<Option<redis::aio::ConnectionManager>>,
 	data_dir: PathBuf,
 	embedding_cache: Cache<u64, Vec<f32>>,
 }
@@ -153,9 +154,26 @@ impl RedisStorage {
 
 		Ok(Self {
 			_client,
+			manager: tokio::sync::RwLock::new(None),
 			data_dir,
 			embedding_cache: Cache::builder().max_capacity(10_000).build(),
 		})
+	}
+
+	async fn get_conn(&self) -> Result<redis::aio::ConnectionManager> {
+		{
+			let read = self.manager.read().await;
+			if let Some(m) = &*read {
+				return Ok(m.clone());
+			}
+		}
+		let mut write = self.manager.write().await;
+		if let Some(m) = &*write {
+			return Ok(m.clone());
+		}
+		let m = redis::aio::ConnectionManager::new(self._client.clone()).await?;
+		*write = Some(m.clone());
+		Ok(m)
 	}
 
 	fn generate_dummy_embedding(&self, text: &str) -> Vec<f32> {
@@ -363,9 +381,9 @@ impl StorageBackend for RedisStorage {
 		// Log the Redis URL (without credentials)
 	    	tracing::debug!("Attempting to get Redis connection...");
 
-		match self._client.get_multiplexed_async_connection().await {
+		match self.get_conn().await {
 			Ok(mut conn) => {
-				tracing::debug!("Got Redis connection");
+				tracing::debug!("Got managed Redis connection");
 				
 				tracing::debug!("Executing HGETALL for key: {}", project_id);
 				match conn.hvals::<&str, Vec<String>>(project_id).await {
@@ -465,7 +483,7 @@ impl StorageBackend for RedisStorage {
 	}
 
 	async fn upsert_entry(&self, project_id: &str, entry: MemoryEntry) -> Result<()> {
-		let mut conn = self._client.get_multiplexed_async_connection().await?;
+		let mut conn = self.get_conn().await?;
 		let existing_count: u64 = conn.hlen(project_id).await?;
 		let already_exists: bool = conn.hexists(project_id, &entry.id).await?;
 		if existing_count >= Self::MAX_ENTRIES_PER_PROJECT && !already_exists {
@@ -493,14 +511,14 @@ impl StorageBackend for RedisStorage {
 	}
 
 	async fn delete_entry(&self, project_id: &str, entry_id: &str) -> Result<()> {
-		let mut conn = self._client.get_multiplexed_async_connection().await?;
+		let mut conn = self.get_conn().await?;
 		let _: () = conn.hdel(project_id, entry_id).await?;
 		self.delete_entry_json_at(entry_id).await;
 		Ok(())
 	}
 
 	async fn purge_project(&self, project_id: &str) -> Result<()> {
-		let mut conn = self._client.get_multiplexed_async_connection().await?;
+		let mut conn = self.get_conn().await?;
 		let _: () = conn.del(project_id).await?;
 		self.purge_brain_dir().await;
 		Ok(())
@@ -526,7 +544,7 @@ impl StorageBackend for RedisStorage {
 	}
 
 	async fn redis_stats(&self) -> Result<RedisStats> {
-		let mut conn = self._client.get_multiplexed_async_connection().await?;
+		let mut conn = self.get_conn().await?;
 
 		let mut max_bytes: Option<u64> = None;
 		let cfg: redis::RedisResult<Vec<String>> = redis::cmd("CONFIG")
@@ -569,7 +587,7 @@ impl StorageBackend for RedisStorage {
 	}
 
 	async fn list_projects(&self) -> Result<Vec<String>> {
-		let mut conn = self._client.get_multiplexed_async_connection().await?;
+		let mut conn = self.get_conn().await?;
 		let keys: Vec<String> = conn.keys("*").await?;
 		let mut projects = Vec::new();
 		for key in keys {
