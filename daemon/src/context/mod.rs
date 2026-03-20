@@ -32,6 +32,7 @@ pub struct CompiledSection {
 pub struct CompilePassMetrics {
     pub relevant_files: usize,
     pub skeletons_built: usize,
+    pub skeleton_index_sections: usize,
     pub deduplicated_files: usize,
     pub history_sections: usize,
     pub rules_sections: usize,
@@ -88,6 +89,7 @@ impl ContextCompiler {
         graph: &DependencyGraph,
         history: &[FlightRecord],
         brain_entries: &[MemoryEntry],
+        skeleton_entries: &[MemoryEntry],
     ) -> Result<CompiledContext> {
         if request.token_budget == 0 {
             return Ok(CompiledContext {
@@ -99,6 +101,7 @@ impl ContextCompiler {
                 metrics: CompilePassMetrics {
                     relevant_files: 0,
                     skeletons_built: 0,
+                    skeleton_index_sections: 0,
                     deduplicated_files: 0,
                     history_sections: 0,
                     rules_sections: 0,
@@ -125,6 +128,7 @@ impl ContextCompiler {
             deduplicated_skeletons,
             history_sections,
             rules_sections,
+            skeleton_entries,
         )?;
         let (selected_sections, omitted_section_ids, total_tokens) =
             self.pass_budget_fitting(ranked_sections, request.token_budget)?;
@@ -138,6 +142,10 @@ impl ContextCompiler {
                     .iter()
                     .filter(|id| id.starts_with("code:"))
                     .count(),
+            skeleton_index_sections: selected_sections
+                .iter()
+                .filter(|section| section.kind == "skeleton-fsi" || section.kind == "skeleton-fusi")
+                .count(),
             deduplicated_files,
             history_sections: selected_sections
                 .iter()
@@ -353,6 +361,7 @@ impl ContextCompiler {
         skeletons: Vec<CodeSkeleton>,
         history_sections: Vec<(String, String, u8)>,
         rules_sections: Vec<(String, String, u8)>,
+        skeleton_entries: &[MemoryEntry],
     ) -> Result<Vec<CompiledSection>> {
         let mut sections = Vec::new();
         sections.push(compiled_section(
@@ -370,6 +379,28 @@ impl ContextCompiler {
                 render_skeleton(&skeleton),
             )?);
         }
+
+        // Inject skeleton index sections (FSI = priority 85, FuSI = priority 78)
+        for entry in skeleton_entries {
+            let is_fsi = entry.tags.contains(&"fsi".to_string());
+            let is_fusi = entry.tags.contains(&"fusi".to_string());
+            if is_fsi {
+                sections.push(compiled_section(
+                    format!("skel:{}", entry.id),
+                    "skeleton-fsi".to_string(),
+                    85,
+                    entry.content.clone(),
+                )?);
+            } else if is_fusi {
+                sections.push(compiled_section(
+                    format!("skel:{}", entry.id),
+                    "skeleton-fusi".to_string(),
+                    78,
+                    entry.content.clone(),
+                )?);
+            }
+        }
+
         for (id, content, priority) in history_sections {
             sections.push(compiled_section(id, "history".to_string(), priority, content)?);
         }

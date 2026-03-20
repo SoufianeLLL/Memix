@@ -373,6 +373,90 @@ mod tests {
 	}
 }
 
+// ─── Skeleton Index Storage ──────────────────────────────────────────────────
+// Skeleton entries (FSI + FuSI) live in a separate Redis hash:
+//   key = "{project_id}_skeletons"
+//   cap = 2,000 entries (independent of the 1,000-entry brain cap)
+//
+// This prevents skeleton entries from competing with brain entries for budget.
+
+impl RedisStorage {
+	fn skeleton_hash_key(project_id: &str) -> String {
+		format!("{}_skeletons", project_id)
+	}
+
+	fn max_skeleton_entries() -> u64 {
+		std::env::var("MEMIX_MAX_SKELETON_ENTRIES").ok().and_then(|s| s.parse().ok()).unwrap_or(2_000)
+	}
+
+	/// Upsert a skeleton entry (FSI or FuSI) into the isolated skeleton hash.
+	/// If at capacity and this is a new entry, evicts the oldest entry by updated_at.
+	pub async fn upsert_skeleton_entry(&self, project_id: &str, entry: MemoryEntry) -> Result<()> {
+		let mut conn = self.get_conn().await?;
+		let hash_key = Self::skeleton_hash_key(project_id);
+		let already_exists: bool = conn.hexists(&hash_key, &entry.id).await.unwrap_or(false);
+
+		if !already_exists {
+			let count: u64 = conn.hlen(&hash_key).await.unwrap_or(0);
+			if count >= Self::max_skeleton_entries() {
+				// LRU eviction: find and delete the entry with the oldest updated_at
+				tracing::warn!(
+					"Skeleton index at capacity ({}) for project {}, evicting oldest entry",
+					Self::max_skeleton_entries(),
+					project_id
+				);
+				if let Ok(values) = conn.hgetall::<&str, HashMap<String, String>>(&hash_key).await {
+					let oldest = values.iter()
+						.filter_map(|(id, json)| {
+							serde_json::from_str::<MemoryEntry>(json)
+								.ok()
+								.map(|e| (id.clone(), e.updated_at))
+						})
+						.min_by_key(|(_, ts)| *ts);
+					if let Some((old_id, _)) = oldest {
+						let _: Result<(), _> = conn.hdel(&hash_key, &old_id).await.map_err(|e| {
+							tracing::error!("Failed to evict skeleton entry {}: {}", old_id, e);
+							e
+						});
+					}
+				}
+			}
+		}
+
+		let json_str = serde_json::to_string(&entry)?;
+		let _: () = conn.hset(&hash_key, &entry.id, json_str).await?;
+		Ok(())
+	}
+
+	/// Get all skeleton entries (FSI + FuSI) for a project.
+	pub async fn get_skeleton_entries(&self, project_id: &str) -> Result<Vec<MemoryEntry>> {
+		let mut conn = self.get_conn().await?;
+		let hash_key = Self::skeleton_hash_key(project_id);
+		let values: Vec<String> = conn.hvals(&hash_key).await.unwrap_or_default();
+		let entries: Vec<MemoryEntry> = values
+			.iter()
+			.filter_map(|v| serde_json::from_str::<MemoryEntry>(v).ok())
+			.collect();
+		Ok(entries)
+	}
+
+	/// Delete a specific skeleton entry by ID.
+	pub async fn delete_skeleton_entry(&self, project_id: &str, entry_id: &str) -> Result<()> {
+		let mut conn = self.get_conn().await?;
+		let hash_key = Self::skeleton_hash_key(project_id);
+		let _: () = conn.hdel(&hash_key, entry_id).await?;
+		Ok(())
+	}
+
+	/// Returns (fsi_count, fusi_count, total) for the skeleton index.
+	pub async fn skeleton_stats(&self, project_id: &str) -> Result<(usize, usize, usize)> {
+		let entries = self.get_skeleton_entries(project_id).await?;
+		let fsi = entries.iter().filter(|e| e.tags.contains(&"fsi".to_string())).count();
+		let fusi = entries.iter().filter(|e| e.tags.contains(&"fusi".to_string())).count();
+		Ok((fsi, fusi, entries.len()))
+	}
+}
+
 #[async_trait]
 impl StorageBackend for RedisStorage {
 	async fn get_entries(&self, project_id: &str) -> Result<Vec<MemoryEntry>> {
@@ -669,5 +753,22 @@ impl StorageBackend for RedisStorage {
 			team_namespace: pulled.namespace,
 			team_brain: pulled.team_brain,
 		})
+	}
+
+	// ─── Skeleton Index overrides ────────────────────────────────────
+	async fn upsert_skeleton_entry(&self, project_id: &str, entry: MemoryEntry) -> Result<()> {
+		RedisStorage::upsert_skeleton_entry(self, project_id, entry).await
+	}
+
+	async fn get_skeleton_entries(&self, project_id: &str) -> Result<Vec<MemoryEntry>> {
+		RedisStorage::get_skeleton_entries(self, project_id).await
+	}
+
+	async fn delete_skeleton_entry(&self, project_id: &str, entry_id: &str) -> Result<()> {
+		RedisStorage::delete_skeleton_entry(self, project_id, entry_id).await
+	}
+
+	async fn skeleton_stats(&self, project_id: &str) -> Result<(usize, usize, usize)> {
+		RedisStorage::skeleton_stats(self, project_id).await
 	}
  }

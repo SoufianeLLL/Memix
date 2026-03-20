@@ -930,7 +930,12 @@ async fn main() -> anyhow::Result<()> {
 		let mut cache: std::collections::HashMap<String, (Vec<u8>, Option<(tree_sitter::Tree, tree_sitter::Language)>)> = std::collections::HashMap::new();
 		let mut feature_snapshots: std::collections::HashMap<String, Vec<AstNodeFeature>> = std::collections::HashMap::new();
 		let mut last_observer_persist = std::time::Instant::now();
+		let mut last_fsi_persist = std::time::Instant::now();
 		let mut recent_deleted_files: std::collections::VecDeque<String> = std::collections::VecDeque::with_capacity(32);
+		let mut call_graph = crate::observer::call_graph::CallGraph::new();
+		fn fsi_debounce_secs() -> u64 {
+			std::env::var("MEMIX_FSI_DEBOUNCE_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(1)
+		}
 
         while let Some(event) = rx.recv().await {
 			let cfg = config_for_events.read().await;
@@ -982,6 +987,21 @@ async fn main() -> anyhow::Result<()> {
 					recent_deleted_files.push_back(key.clone());
 					recorder_for_events.record_event(SessionEvent::AstMutation { file: key.clone(), nodes_changed: 0 });
 					tracing::debug!("Observer removed file from live graph: {}", key);
+
+					// ─── Skeleton cleanup on file deletion ─────────────────────
+					call_graph.remove_file(&key);
+					let fsi_id = crate::observer::skeleton::file_skeleton_id(&key);
+					let _ = storage_for_events.delete_skeleton_entry(&project_id_for_events, &fsi_id).await;
+					// Delete all FuSI entries for this file (prefix match)
+					let fusi_prefix = format!("fusi::{}", crate::observer::skeleton::normalize_path(&key));
+					if let Ok(entries) = storage_for_events.get_skeleton_entries(&project_id_for_events).await {
+						for entry in entries {
+							if entry.id.starts_with(&fusi_prefix) {
+								let _ = storage_for_events.delete_skeleton_entry(&project_id_for_events, &entry.id).await;
+							}
+						}
+					}
+					tracing::debug!("Skeleton: cleaned up FSI + FuSI entries for deleted file: {}", key);
 				}
 			}
 
@@ -1099,6 +1119,52 @@ async fn main() -> anyhow::Result<()> {
 				}
 
 				let imports = extract_imports(ext, &String::from_utf8_lossy(&new_bytes));
+
+				// ─── Skeleton Index: FSI + FuSI persistence ──────────────────
+				if last_fsi_persist.elapsed() >= std::time::Duration::from_secs(fsi_debounce_secs()) {
+					last_fsi_persist = std::time::Instant::now();
+
+					// Borrow features from the snapshot (new_features was moved into feature_snapshots above)
+					if let Some(features) = feature_snapshots.get(&key) {
+						// Update call graph with this file's call sites
+						let call_symbols: Vec<(String, Vec<String>)> = features
+							.iter()
+							.filter(|f| matches!(f.kind.as_str(), "function" | "method" | "constructor"))
+							.map(|f| (f.name.clone(), f.calls.clone()))
+							.collect();
+						call_graph.update_file(&key, call_symbols);
+
+						// Build and persist FSI (always for the saved file)
+						let dep_graph_snapshot = {
+							let a = autonomous_for_events.lock().await;
+							a.dependency_graph.clone()
+						};
+						let skeleton = crate::observer::skeleton::FileSkeleton::build(
+							&key,
+							features,
+							&dep_graph_snapshot,
+							&String::from_utf8_lossy(&new_bytes),
+						);
+						let fsi_entry = skeleton.to_memory_entry(&project_id_for_events);
+						if let Err(e) = storage_for_events.upsert_skeleton_entry(&project_id_for_events, fsi_entry).await {
+							tracing::warn!("Skeleton: FSI upsert failed for {}: {}", key, e);
+						}
+
+						// FuSI: only for hot files (recently changed or direct dependency)
+						let is_hot = is_hot_file(&key, &feature_snapshots, &dep_graph_snapshot);
+						if is_hot {
+							let symbol_entries = skeleton.to_symbol_entries(&project_id_for_events, &call_graph);
+							for entry in symbol_entries {
+								if let Err(e) = storage_for_events.upsert_skeleton_entry(&project_id_for_events, entry).await {
+									tracing::warn!("Skeleton: FuSI upsert failed: {}", e);
+								}
+							}
+						}
+
+						tracing::debug!("Skeleton: FSI persisted for {} (hot={})", key, is_hot);
+					}
+				}
+
 				let diff_for_agents = diff.clone();
 				let (intent_entry_json, related_files_for_agents, graph_snapshot_for_agents) = {
 					let mut a = autonomous_for_events.lock().await;
@@ -1389,4 +1455,31 @@ async fn main() -> anyhow::Result<()> {
 	std::future::pending::<()>().await;
 	#[allow(unreachable_code)]
 	Ok(())
+}
+
+/// A file is "hot" if it's recently changed (in feature_snapshots) or has
+/// direct dependencies in the project graph. Only hot files get FuSI entries
+/// to keep skeleton storage bounded.
+fn max_hot_files() -> usize {
+    std::env::var("MEMIX_MAX_HOT_FILES").ok().and_then(|s| s.parse().ok()).unwrap_or(30)
+}
+fn is_hot_file(
+	file_path: &str,
+	feature_snapshots: &std::collections::HashMap<String, Vec<AstNodeFeature>>,
+	graph: &crate::observer::graph::DependencyGraph,
+) -> bool {
+	// If the file has feature snapshots, it was recently parsed
+	if feature_snapshots.contains_key(file_path) {
+		// But only if we haven't exceeded the hot file cap
+		if feature_snapshots.len() <= max_hot_files() {
+			return true;
+		}
+	}
+	// Files with high fan-in (many dependents) are always hot
+	if let Some(deps) = graph.edges_in.get(file_path) {
+		if deps.len() >= 3 {
+			return true;
+		}
+	}
+	false
 }

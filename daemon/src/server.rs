@@ -372,6 +372,9 @@ pub fn build_router(
 		.route("/api/v1/observer/intent", get(get_observer_intent))
 		.route("/api/v1/observer/git", get(get_observer_git))
 
+		// Skeleton Index
+		.route("/api/v1/skeleton/stats/:project_id", get(skeleton_stats))
+
 		// Session recorder
 		.route("/api/v1/session/current", get(get_session_current))
 		.route("/api/v1/session/replay", get(get_session_replay))
@@ -592,6 +595,22 @@ async fn control_status(State(state): State<Arc<AppState>>) -> impl IntoResponse
          }))).into_response()
      }
  }
+
+async fn skeleton_stats(
+	State(state): State<Arc<AppState>>,
+	Path(project_id): Path<String>,
+) -> impl IntoResponse {
+	match state.storage.skeleton_stats(&project_id).await {
+		Ok((fsi, fusi, total)) => (StatusCode::OK, Json(serde_json::json!({
+			"project_id": project_id,
+			"fsi_count": fsi,
+			"fusi_count": fusi,
+			"total": total,
+			"capacity": 2000
+		}))).into_response(),
+		Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+	}
+}
 
  async fn get_license_status(
      State(state): State<Arc<AppState>>,
@@ -967,7 +986,7 @@ async fn purge_project(
 async fn daemon_status() -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "status": "healthy",
-        "version": "0.1.2-beta",
+        "version": "0.2.2-beta",
         "features": [
             "autonomous_watching",
             "semantic_diff",
@@ -1124,11 +1143,12 @@ async fn compile_context(
 		Ok(entries) => entries,
 		Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
 	};
+	let skeleton_entries = state.storage.get_skeleton_entries(&req.project_id).await.unwrap_or_default();
 	let graph = state.autonomous.lock().await.dependency_graph.clone();
 	let history = state.recorder.dump_blackbox();
 	let root = state.workspace_root.as_deref().filter(|s| s.len() < 1024).map(PathBuf::from);
 	let compiler = ContextCompiler::new(root);
-	match compiler.compile(req, &graph, &history, &entries) {
+	match compiler.compile(req, &graph, &history, &entries, &skeleton_entries) {
 		Ok(compiled) => (StatusCode::OK, Json(compiled)).into_response(),
 		Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
 	}

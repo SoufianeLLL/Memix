@@ -187,6 +187,8 @@ mod tests {
                 cyclomatic_complexity: 1,
                 pattern_tags: vec![],
                 is_exported: false,
+                calls: vec![],
+                line_count: None,
             }).collect()
         };
         SemanticDiff {

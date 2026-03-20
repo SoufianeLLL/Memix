@@ -1125,6 +1125,8 @@ mod tests {
 				cyclomatic_complexity: 2,
 				pattern_tags: vec!["api-route".to_string()],
 				is_exported: true,
+				calls: vec![],
+				line_count: None,
 			}],
 		);
 		file_features.insert(
@@ -1139,6 +1141,8 @@ mod tests {
 				cyclomatic_complexity: 2,
 				pattern_tags: vec!["component-driven".to_string()],
 				is_exported: true,
+				calls: vec![],
+				line_count: None,
 			}],
 		);
 		file_features.insert(
@@ -1153,6 +1157,8 @@ mod tests {
 				cyclomatic_complexity: 1,
 				pattern_tags: vec!["repository".to_string()],
 				is_exported: true,
+				calls: vec![],
+				line_count: None,
 			}],
 		);
 

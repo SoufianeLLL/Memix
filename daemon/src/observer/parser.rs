@@ -16,6 +16,12 @@ pub struct AstNodeFeature {
     pub cyclomatic_complexity: u32,
     pub pattern_tags: Vec<String>,
     pub is_exported: bool,
+    /// Functions/methods this entity calls (extracted from call_expression nodes)
+    #[serde(default)]
+    pub calls: Vec<String>,
+    /// Line count of this entity's body
+    #[serde(default)]
+    pub line_count: Option<u32>,
 }
 
 pub struct AstParser {
@@ -119,6 +125,13 @@ impl AstParser {
             pattern_tags.sort();
             pattern_tags.dedup();
 
+            let line_count = Some(body.lines().count().max(1) as u32);
+            let calls = if matches!(kind.as_str(), "function" | "method" | "constructor") {
+                extract_call_sites(entity_node, source_code)
+            } else {
+                Vec::new()
+            };
+
             features.push(AstNodeFeature {
                 name,
                 kind,
@@ -129,6 +142,8 @@ impl AstParser {
                 cyclomatic_complexity,
                 pattern_tags,
                 is_exported,
+                calls,
+                line_count,
             });
         }
 
@@ -445,6 +460,90 @@ fn cyclomatic_weight(node: Node<'_>, extension: &str, source_code: &[u8]) -> u32
     }
 
     0
+}
+
+/// Walk child nodes of an entity to find call expressions and extract callee identifiers.
+/// Capped at 15 per entity to avoid bloat from generated code.
+fn extract_call_sites(entity_node: Node<'_>, source_code: &[u8]) -> Vec<String> {
+    const MAX_CALLS: usize = 15;
+    let mut calls = Vec::new();
+    let mut stack = vec![entity_node];
+
+    while let Some(node) = stack.pop() {
+        if calls.len() >= MAX_CALLS {
+            break;
+        }
+
+        let kind = node.kind();
+        let is_call = matches!(
+            kind,
+            "call_expression" | "method_invocation" | "invocation_expression"
+        );
+
+        if is_call {
+            // Try to extract the callee name
+            let callee = node.child_by_field_name("function")
+                .or_else(|| node.child_by_field_name("name"))
+                .or_else(|| node.child(0));
+
+            if let Some(callee_node) = callee {
+                let callee_text = extract_callee_name(callee_node, source_code);
+                if !callee_text.is_empty() && callee_text.len() < 80 && !calls.contains(&callee_text) {
+                    calls.push(callee_text);
+                }
+            }
+        }
+
+        // Walk children (skip the entity itself to avoid infinite recursion)
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            // Skip nested function definitions to avoid polluting call sites
+            let child_kind = child.kind();
+            if !matches!(
+                child_kind,
+                "function_declaration" | "function_definition" | "function_item"
+                | "arrow_function" | "function_expression" | "method_definition"
+                | "method_declaration" | "class_declaration" | "class_definition"
+            ) {
+                stack.push(child);
+            }
+        }
+    }
+
+    calls
+}
+
+/// Extract the callee name from a call expression node.
+/// Handles simple identifiers and member access (e.g., `foo.bar` -> `foo.bar`).
+fn extract_callee_name(node: Node<'_>, source_code: &[u8]) -> String {
+    match node.kind() {
+        "identifier" | "property_identifier" | "field_identifier" | "simple_identifier" | "name" => {
+            slice_text(source_code, node.start_byte(), node.end_byte())
+                .trim()
+                .to_string()
+        }
+        "member_expression" | "field_expression" | "scoped_identifier" | "member_access_expression" => {
+            // e.g., obj.method -> take the last segment for brevity
+            let full = slice_text(source_code, node.start_byte(), node.end_byte());
+            let trimmed = full.trim();
+            if trimmed.len() > 40 {
+                // Too long — just take the last identifier
+                trimmed.rsplit('.').next().unwrap_or(trimmed).to_string()
+            } else {
+                trimmed.to_string()
+            }
+        }
+        _ => {
+            // Fallback: try the raw text if short enough
+            let text = slice_text(source_code, node.start_byte(), node.end_byte());
+            let trimmed = text.trim();
+            if trimmed.len() <= 40 && !trimmed.contains('\n') {
+                trimmed.to_string()
+            } else {
+                String::new()
+            }
+        }
+    }
 }
 
 #[cfg(test)]

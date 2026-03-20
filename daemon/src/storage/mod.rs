@@ -61,6 +61,32 @@ pub trait StorageBackend: Send + Sync {
         actor_id: &str,
         shared_secret: &str,
     ) -> Result<TeamSyncReport>;
+
+    // ─── Skeleton Index methods (isolated storage) ───────────────────
+
+    /// Upsert a skeleton entry (FSI or FuSI) into the isolated skeleton hash.
+    async fn upsert_skeleton_entry(&self, project_id: &str, entry: MemoryEntry) -> Result<()> {
+        let _ = (project_id, entry);
+        Ok(())
+    }
+
+    /// Get all skeleton entries (FSI + FuSI) for a project.
+    async fn get_skeleton_entries(&self, project_id: &str) -> Result<Vec<MemoryEntry>> {
+        let _ = project_id;
+        Ok(Vec::new())
+    }
+
+    /// Delete a specific skeleton entry by ID.
+    async fn delete_skeleton_entry(&self, project_id: &str, entry_id: &str) -> Result<()> {
+        let _ = (project_id, entry_id);
+        Ok(())
+    }
+
+    /// Returns (fsi_count, fusi_count, total) for the skeleton index.
+    async fn skeleton_stats(&self, project_id: &str) -> Result<(usize, usize, usize)> {
+        let _ = project_id;
+        Ok((0, 0, 0))
+    }
 }
 
 /// Factory function deciding which backend to boot based on config.
