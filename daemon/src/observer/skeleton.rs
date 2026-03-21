@@ -289,7 +289,10 @@ impl FileSkeleton {
             .iter()
             .take(max_symbols_per_hot_file())
             .map(|func| {
-                let calls = call_graph.calls_from(&self.path, &func.name);
+                let calls: Vec<String> = call_graph.calls_from(&self.path, &func.name)
+                    .into_iter()
+                    .map(|e| e.callee_symbol)
+                    .collect();
                 let called_by = call_graph.callers_of(&self.path, &func.name);
 
                 let content = render_symbol_entry(
@@ -521,9 +524,13 @@ mod tests {
         let skeleton = FileSkeleton::build("src/main.rs", &features, &graph, "");
 
         let mut cg = CallGraph::new();
-        cg.update_file("src/main.rs", vec![
-            ("main".to_string(), vec!["helper".to_string()]),
-        ]);
+        cg.update_file(
+            "src/main.rs",
+            vec![(
+                "main".to_string(),
+                vec![crate::observer::call_graph::ResolvedEdge::new_unresolved("helper")],
+            )],
+        );
 
         let entries = skeleton.to_symbol_entries("test-project", &cg);
         assert_eq!(entries.len(), 2);

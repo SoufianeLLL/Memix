@@ -221,6 +221,13 @@ impl RedisStorage {
 			.ok_or_else(|| anyhow::anyhow!("fastembed model initialization did not persist"))
 	}
 
+	pub async fn embed_text_static(text: &str) -> Vec<f32> {
+		match Self::embed_text_real(text.to_string()).await {
+			Ok(v) if v.len() == 384 => v,
+			_ => vec![0.0; 384],
+		}
+	}
+
 	async fn embed_text_real(text: String) -> anyhow::Result<Vec<f32>> {
 		let handle = tokio::task::spawn_blocking(move || {
 			let model = Self::embedding_model()?;

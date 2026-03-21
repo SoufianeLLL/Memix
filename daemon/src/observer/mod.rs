@@ -6,3 +6,7 @@ pub mod dna;
 pub mod imports;
 pub mod skeleton;
 pub mod call_graph;
+pub mod importance;
+pub mod oxc_semantic;
+pub mod embedding_store;
+pub mod background_indexer;

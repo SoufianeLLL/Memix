@@ -53,6 +53,7 @@ use crate::intelligence::autonomous::AutonomousPairProgrammer;
 use crate::intelligence::intent::IntentEngine;
 use crate::intelligence::predictor::ContextPredictor;
 use crate::git::archaeologist::{GitArchaeologist, ProjectGitInsights};
+use crate::observer::call_graph::CallGraph;
 use crate::observer::differ::AstDiffer;
 use crate::observer::dna::{DnaRuleConfig, ProjectCodeDna};
 use crate::observer::imports::{extract_imports, signature_head};
@@ -633,6 +634,7 @@ async fn main() -> anyhow::Result<()> {
 	let recorder = Arc::new(FlightRecorder::new(2000));
 	let code_dna = Arc::new(tokio::sync::Mutex::new(ProjectCodeDna::default()));
 	let predictor = Arc::new(ContextPredictor::new());
+	let call_graph = Arc::new(tokio::sync::Mutex::new(CallGraph::new()));
 	let agent_workspace_root = app_config
 		.workspace_root
 		.clone()
@@ -685,6 +687,59 @@ async fn main() -> anyhow::Result<()> {
     ));
 	let team_actor_id = derive_team_actor_id(&app_config);
 
+	let data_dir = app_config
+		.data_dir
+		.clone()
+		.map(std::path::PathBuf::from)
+		.unwrap_or_else(|| std::path::PathBuf::from(".memix"));
+
+	// Initialize EmbeddingStore
+	let redis_client = None; // For future: extract from storage_backend if it's Redis
+	let embedding_store = crate::observer::embedding_store::EmbeddingStore::load(
+		&project_id_for_events,
+		&data_dir,
+		redis_client,
+	).await.unwrap_or_else(|e| {
+		tracing::warn!("EmbeddingStore load failed: {}, starting empty", e);
+		crate::observer::embedding_store::EmbeddingStore::empty(&data_dir, &project_id_for_events)
+	});
+
+	// Initialize TokenTracker
+	let token_tracker = Arc::new(
+		crate::token::tracker::TokenTracker::load(
+			&project_id_for_events,
+			&data_dir,
+		).await
+	);
+
+	// Spawn background indexer
+	if let Some(root) = app_config.workspace_root.clone() {
+		let indexer = crate::observer::background_indexer::BackgroundIndexer::new(
+			std::path::PathBuf::from(root),
+			project_id_for_events.clone(),
+			storage_backend.clone(),
+			embedding_store.clone(),
+			token_tracker.clone(),
+		);
+		tokio::spawn(async move {
+			tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+			indexer.run_if_needed().await;
+		});
+	}
+
+	// Add a periodic flush task for both token stats and embeddings
+	let flush_token_tracker = token_tracker.clone();
+	let flush_embedding_store = embedding_store.clone();
+	let flush_project_id = project_id_for_events.clone();
+	tokio::spawn(async move {
+		let mut interval = tokio::time::interval(std::time::Duration::from_secs(300)); // every 5 min
+		loop {
+			interval.tick().await;
+			let _ = flush_token_tracker.flush_session_to_lifetime(&flush_project_id).await;
+			let _ = flush_embedding_store.flush(None).await;
+		}
+	});
+
     // 3. Build the Axum server routes and pass the shared storage state
     let app = server::build_router(
 		storage_backend.clone(),
@@ -692,6 +747,7 @@ async fn main() -> anyhow::Result<()> {
 		recorder.clone(),
 		code_dna.clone(),
 		predictor.clone(),
+		call_graph.clone(),
 		agent_runtime.clone(),
 		git_insights.clone(),
 		app_config.workspace_root.clone(),
@@ -700,6 +756,8 @@ async fn main() -> anyhow::Result<()> {
 		app_config.team_secret.clone(),
 		license_validator,
         daemon_config.clone(),
+		token_tracker.clone(),
+		embedding_store.clone(),
 	);
 
 	// ─── BIND UNIX SOCKET IMMEDIATELY after router is ready ───────────────────
@@ -932,7 +990,8 @@ async fn main() -> anyhow::Result<()> {
 		let mut last_observer_persist = std::time::Instant::now();
 		let mut last_fsi_persist = std::time::Instant::now();
 		let mut recent_deleted_files: std::collections::VecDeque<String> = std::collections::VecDeque::with_capacity(32);
-		let mut call_graph = crate::observer::call_graph::CallGraph::new();
+		let call_graph_for_events = call_graph.clone();
+		let workspace_root_for_events = app_config.workspace_root.clone().map(std::path::PathBuf::from);
 		fn fsi_debounce_secs() -> u64 {
 			std::env::var("MEMIX_FSI_DEBOUNCE_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(1)
 		}
@@ -989,7 +1048,7 @@ async fn main() -> anyhow::Result<()> {
 					tracing::debug!("Observer removed file from live graph: {}", key);
 
 					// ─── Skeleton cleanup on file deletion ─────────────────────
-					call_graph.remove_file(&key);
+					call_graph_for_events.lock().await.remove_file(&key);
 					let fsi_id = crate::observer::skeleton::file_skeleton_id(&key);
 					let _ = storage_for_events.delete_skeleton_entry(&project_id_for_events, &fsi_id).await;
 					// Delete all FuSI entries for this file (prefix match)
@@ -1118,7 +1177,75 @@ async fn main() -> anyhow::Result<()> {
 						.await;
 				}
 
-				let imports = extract_imports(ext, &String::from_utf8_lossy(&new_bytes));
+				let source_code = String::from_utf8_lossy(&new_bytes).to_string();
+				
+				// Optional Compiler-Grade OXC Analysis (Typescript/Javascript)
+				let is_oxc_supported = crate::observer::oxc_semantic::is_oxc_supported(ext);
+				let oxc_analysis = if is_oxc_supported && std::env::var("MEMIX_OXC_ENABLED").unwrap_or_else(|_| "true".to_string()) == "true" {
+					crate::observer::oxc_semantic::analyze_file(
+						std::path::Path::new(&key),
+						&source_code,
+						workspace_root_for_events.as_deref(),
+					)
+				} else {
+					None
+				};
+				
+				let imports = if let Some(ref analysis) = oxc_analysis {
+					// Map OXC resolved imports to string paths
+					let unresolved_relative: Vec<String> = analysis
+						.resolved_imports
+						.iter()
+						.filter(|i| i.resolved_path.is_none() && (i.specifier.starts_with('.') || i.specifier.starts_with('/')))
+						.map(|i| i.specifier.clone())
+						.collect();
+					if !unresolved_relative.is_empty() {
+						let now = Utc::now();
+						let warning_entry = MemoryEntry {
+							id: format!(
+								"warning_dead_import_{}_{}.json",
+								now.timestamp_millis(),
+								uuid::Uuid::new_v4()
+							),
+							project_id: project_id_for_events.clone(),
+							kind: MemoryKind::Warning,
+							content: format!(
+								"Unresolved import(s) detected in {}:\n{}",
+								key,
+								unresolved_relative
+									.iter()
+									.map(|s| format!("- {}", s))
+									.collect::<Vec<_>>()
+									.join("\n")
+							),
+							tags: vec![
+								"warning".to_string(),
+								"oxc".to_string(),
+								"dead-import".to_string(),
+							],
+							source: MemorySource::FileWatcher,
+							superseded_by: None,
+							contradicts: vec![],
+							parent_id: None,
+							caused_by: vec![],
+							enables: vec![],
+							created_at: now,
+							updated_at: now,
+							access_count: 0,
+							last_accessed_at: None,
+						};
+						let _ = storage_for_events
+							.upsert_entry(&project_id_for_events, warning_entry)
+							.await;
+					}
+					analysis
+						.resolved_imports
+						.iter()
+						.map(|i| i.resolved_path.clone().unwrap_or_else(|| i.specifier.clone()))
+						.collect()
+				} else {
+					extract_imports(ext, &source_code)
+				};
 
 				// ─── Skeleton Index: FSI + FuSI persistence ──────────────────
 				if last_fsi_persist.elapsed() >= std::time::Duration::from_secs(fsi_debounce_secs()) {
@@ -1127,12 +1254,25 @@ async fn main() -> anyhow::Result<()> {
 					// Borrow features from the snapshot (new_features was moved into feature_snapshots above)
 					if let Some(features) = feature_snapshots.get(&key) {
 						// Update call graph with this file's call sites
-						let call_symbols: Vec<(String, Vec<String>)> = features
-							.iter()
-							.filter(|f| matches!(f.kind.as_str(), "function" | "method" | "constructor"))
-							.map(|f| (f.name.clone(), f.calls.clone()))
-							.collect();
-						call_graph.update_file(&key, call_symbols);
+						let call_symbols: Vec<(String, Vec<crate::observer::call_graph::ResolvedEdge>)> = if let Some(ref analysis) = oxc_analysis {
+							let mut oxc_calls: std::collections::HashMap<String, Vec<crate::observer::call_graph::ResolvedEdge>> = std::collections::HashMap::new();
+							for call in &analysis.calls {
+								oxc_calls.entry(call.caller_fn.clone()).or_default().push(crate::observer::call_graph::ResolvedEdge {
+									callee_file: call.callee_file.clone().unwrap_or_default(),
+									callee_symbol: call.callee_symbol.clone().unwrap_or_else(|| call.callee_expr.clone()),
+									callee_line: call.callee_line.unwrap_or(call.line),
+									is_method: call.is_method,
+								});
+							}
+							oxc_calls.into_iter().collect()
+						} else {
+							features
+								.iter()
+								.filter(|f| matches!(f.kind.as_str(), "function" | "method" | "constructor"))
+								.map(|f| (f.name.clone(), f.calls.iter().map(|s| crate::observer::call_graph::ResolvedEdge::new_unresolved(s)).collect()))
+								.collect()
+						};
+						call_graph_for_events.lock().await.update_file(&key, call_symbols);
 
 						// Build and persist FSI (always for the saved file)
 						let dep_graph_snapshot = {
@@ -1153,7 +1293,8 @@ async fn main() -> anyhow::Result<()> {
 						// FuSI: only for hot files (recently changed or direct dependency)
 						let is_hot = is_hot_file(&key, &feature_snapshots, &dep_graph_snapshot);
 						if is_hot {
-							let symbol_entries = skeleton.to_symbol_entries(&project_id_for_events, &call_graph);
+							let call_graph_snapshot = call_graph_for_events.lock().await;
+							let symbol_entries = skeleton.to_symbol_entries(&project_id_for_events, &call_graph_snapshot);
 							for entry in symbol_entries {
 								if let Err(e) = storage_for_events.upsert_skeleton_entry(&project_id_for_events, entry).await {
 									tracing::warn!("Skeleton: FuSI upsert failed: {}", e);
@@ -1169,6 +1310,54 @@ async fn main() -> anyhow::Result<()> {
 				let (intent_entry_json, related_files_for_agents, graph_snapshot_for_agents) = {
 					let mut a = autonomous_for_events.lock().await;
 					a.update_dependency_graph(&key, &imports);
+					let missing_resolved: Vec<String> = a
+						.dependency_graph
+						.edges_out
+						.get(&key)
+						.into_iter()
+						.flat_map(|deps| deps.iter())
+						.filter(|p| p.starts_with('/') && !std::path::Path::new(p.as_str()).exists())
+						.cloned()
+						.collect();
+					if !missing_resolved.is_empty() {
+						let now = Utc::now();
+						let warning_entry = MemoryEntry {
+							id: format!(
+								"warning_orphan_dependency_{}_{}.json",
+								now.timestamp_millis(),
+								uuid::Uuid::new_v4()
+							),
+							project_id: project_id_for_events.clone(),
+							kind: MemoryKind::Warning,
+							content: format!(
+								"Dependency graph references missing file(s) from {}:\n{}",
+								key,
+								missing_resolved
+									.iter()
+									.map(|s| format!("- {}", s))
+									.collect::<Vec<_>>()
+									.join("\n")
+							),
+							tags: vec![
+								"warning".to_string(),
+								"observer".to_string(),
+								"orphan-dependency".to_string(),
+							],
+							source: MemorySource::FileWatcher,
+							superseded_by: None,
+							contradicts: vec![],
+							parent_id: None,
+							caused_by: vec![],
+							enables: vec![],
+							created_at: now,
+							updated_at: now,
+							access_count: 0,
+							last_accessed_at: None,
+						};
+						let _ = storage_for_events
+							.upsert_entry(&project_id_for_events, warning_entry)
+							.await;
+					}
 					let related_files = {
 						let mut files = Vec::new();
 						if let Some(deps) = a.dependency_graph.edges_out.get(&key) {

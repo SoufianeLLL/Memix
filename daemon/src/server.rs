@@ -27,8 +27,10 @@ use crate::intelligence::predictor::ContextPredictor;
 use crate::migrations;
 use crate::git::archaeologist::ProjectGitInsights;
 use crate::observer::differ::SemanticDiff;
+use crate::observer::call_graph::{CallGraph, FileCausalContext};
 use crate::observer::dna::ProjectCodeDna;
 use crate::observer::graph::DependencyGraph;
+use crate::observer::importance::{compute_importance, compute_blast_radius};
 use crate::recorder::flight::{FlightRecorder, FlightRecord};
 
 pub struct AppState {
@@ -37,6 +39,7 @@ pub struct AppState {
 	pub recorder: Arc<FlightRecorder>,
 	pub code_dna: Arc<tokio::sync::Mutex<ProjectCodeDna>>,
 	pub predictor: Arc<ContextPredictor>,
+	pub call_graph: Arc<tokio::sync::Mutex<CallGraph>>,
 	pub agent_runtime: Arc<tokio::sync::Mutex<AgentRuntime>>,
 	pub git_insights: Arc<tokio::sync::Mutex<ProjectGitInsights>>,
 	pub workspace_root: Option<String>,
@@ -45,6 +48,8 @@ pub struct AppState {
 	pub configured_team_secret: Option<String>,
 	pub license_validator: Arc<LicenseValidator>,
 	pub config: Arc<tokio::sync::RwLock<DaemonConfig>>,
+    pub token_tracker: Arc<crate::token::tracker::TokenTracker>,
+    pub embedding_store: crate::observer::embedding_store::EmbeddingStore,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -289,6 +294,7 @@ pub fn build_router(
     recorder: Arc<FlightRecorder>,
     code_dna: Arc<tokio::sync::Mutex<ProjectCodeDna>>,
     predictor: Arc<ContextPredictor>,
+    call_graph: Arc<tokio::sync::Mutex<CallGraph>>,
     agent_runtime: Arc<tokio::sync::Mutex<AgentRuntime>>,
     git_insights: Arc<tokio::sync::Mutex<ProjectGitInsights>>,
     workspace_root: Option<String>,
@@ -297,6 +303,8 @@ pub fn build_router(
     configured_team_secret: Option<String>,
     license_validator: Arc<LicenseValidator>,
     config: Arc<tokio::sync::RwLock<DaemonConfig>>,
+    token_tracker: Arc<crate::token::tracker::TokenTracker>,
+    embedding_store: crate::observer::embedding_store::EmbeddingStore,
 ) -> Router {
     let shared_state = Arc::new(AppState {
         storage,
@@ -304,6 +312,7 @@ pub fn build_router(
         recorder,
         code_dna,
         predictor,
+        call_graph,
         agent_runtime,
         git_insights,
         workspace_root,
@@ -312,6 +321,8 @@ pub fn build_router(
         configured_team_secret,
         license_validator,
         config,
+        token_tracker,
+        embedding_store,
     });
 
     Router::new()
@@ -371,9 +382,14 @@ pub fn build_router(
 		.route("/api/v1/observer/changes", get(get_observer_changes))
 		.route("/api/v1/observer/intent", get(get_observer_intent))
 		.route("/api/v1/observer/git", get(get_observer_git))
+		.route("/api/v1/observer/call-graph", get(get_causal_chain))
 
 		// Skeleton Index
 		.route("/api/v1/skeleton/stats/:project_id", get(skeleton_stats))
+
+		// Structural Intelligence
+		.route("/api/v1/importance", get(get_importance))
+		.route("/api/v1/blast-radius", get(get_blast_radius))
 
 		// Session recorder
 		.route("/api/v1/session/current", get(get_session_current))
@@ -383,6 +399,10 @@ pub fn build_router(
         // Team Sync
         .route("/api/v1/team/sync", post(team_sync))
         
+        // Token Intelligence
+        .route("/api/v1/tokens/stats", get(get_token_stats))
+        .route("/api/v1/tokens/record", post(record_ai_token_use))
+
         .with_state(shared_state)
 }
 
@@ -446,6 +466,19 @@ async fn get_observer_intent(State(state): State<Arc<AppState>>) -> impl IntoRes
 async fn get_observer_git(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 	let snapshot = state.git_insights.lock().await.clone();
 	(StatusCode::OK, Json(snapshot)).into_response()
+}
+
+#[derive(Deserialize)]
+struct CausalChainQuery {
+	file: String,
+}
+
+async fn get_causal_chain(
+	State(state): State<Arc<AppState>>,
+	Query(query): Query<CausalChainQuery>,
+) -> impl IntoResponse {
+	let context = state.call_graph.lock().await.causal_context_for_file(&query.file);
+	(StatusCode::OK, Json(context)).into_response()
 }
 
 async fn get_observer_changes(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -610,6 +643,105 @@ async fn skeleton_stats(
 		}))).into_response(),
 		Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
 	}
+}
+
+#[derive(Deserialize)]
+struct ImportanceQuery {
+	top_n: Option<usize>,
+}
+
+async fn get_importance(
+	State(state): State<Arc<AppState>>,
+	Query(params): Query<ImportanceQuery>,
+) -> impl IntoResponse {
+	let autonomous = state.autonomous.lock().await;
+	let graph = &autonomous.dependency_graph;
+	let top_n = params.top_n.unwrap_or(15);
+	let scores = compute_importance(&graph.edges_out, top_n);
+	(StatusCode::OK, Json(serde_json::json!({
+		"top_files": scores.top_files,
+		"scc_groups": scores.scc_groups,
+		"circular_files": scores.circular_files,
+		"node_count": scores.betweenness.len(),
+		"cycle_count": scores.scc_groups.len(),
+		"topological_order_length": scores.topological_order.len(),
+		"betweenness": scores.betweenness,
+		"pagerank": scores.pagerank,
+	}))).into_response()
+}
+
+#[derive(Deserialize)]
+struct BlastRadiusQuery {
+	file: String,
+	max_depth: Option<usize>,
+}
+
+async fn get_blast_radius(
+	State(state): State<Arc<AppState>>,
+	Query(params): Query<BlastRadiusQuery>,
+) -> impl IntoResponse {
+	let max_depth = params.max_depth.unwrap_or(
+		std::env::var("MEMIX_MAX_BLAST_RADIUS_DEPTH").ok().and_then(|s| s.parse().ok()).unwrap_or(5)
+	);
+	let autonomous = state.autonomous.lock().await;
+	let graph = &autonomous.dependency_graph;
+	let blast = compute_blast_radius(&graph.edges_in, &params.file, max_depth);
+	(StatusCode::OK, Json(blast)).into_response()
+}
+
+fn render_causal_context(context: &FileCausalContext) -> Option<String> {
+	if context.symbols.is_empty() {
+		return None;
+	}
+
+	let mut lines = vec![
+		format!("Causal chain for {}", context.file),
+		format!(
+			"Outgoing edges: {} | Incoming edges: {}",
+			context.total_outgoing_edges, context.total_incoming_edges
+		),
+	];
+
+	for symbol in context.symbols.iter().take(8) {
+		lines.push(format!("\nSymbol: {}", symbol.symbol));
+		if symbol.called_by.is_empty() {
+			lines.push("Called by: none".to_string());
+		} else {
+			lines.push("Called by:".to_string());
+			for caller in symbol.called_by.iter().take(4) {
+				let location = if caller.call_line > 0 {
+					format!(" line {}", caller.call_line)
+				} else {
+					String::new()
+				};
+				lines.push(format!(
+					"- {} :: {}{}",
+					caller.caller_file, caller.caller_symbol, location
+				));
+			}
+		}
+
+		if symbol.calls.is_empty() {
+			lines.push("Calls: none".to_string());
+		} else {
+			lines.push("Calls:".to_string());
+			for callee in symbol.calls.iter().take(5) {
+				let target = if callee.callee_file.is_empty() {
+					callee.callee_symbol.clone()
+				} else if callee.callee_line > 0 {
+					format!(
+						"{} :: {} (line {})",
+						callee.callee_file, callee.callee_symbol, callee.callee_line
+					)
+				} else {
+					format!("{} :: {}", callee.callee_file, callee.callee_symbol)
+				};
+				lines.push(format!("- {}", target));
+			}
+		}
+	}
+
+	Some(lines.join("\n"))
 }
 
  async fn get_license_status(
@@ -1145,13 +1277,22 @@ async fn compile_context(
 	};
 	let skeleton_entries = state.storage.get_skeleton_entries(&req.project_id).await.unwrap_or_default();
 	let graph = state.autonomous.lock().await.dependency_graph.clone();
+	let causal_context = render_causal_context(
+		&state.call_graph.lock().await.causal_context_for_file(&req.active_file),
+	);
 	let history = state.recorder.dump_blackbox();
 	let root = state.workspace_root.as_deref().filter(|s| s.len() < 1024).map(PathBuf::from);
-	let compiler = ContextCompiler::new(root);
-	match compiler.compile(req, &graph, &history, &entries, &skeleton_entries) {
-		Ok(compiled) => (StatusCode::OK, Json(compiled)).into_response(),
-		Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-	}
+	        let compiler = ContextCompiler::new(root);
+        match compiler.compile(req, &graph, &history, &entries, &skeleton_entries, causal_context) {
+                Ok(compiled) => {
+                        state.token_tracker.session.record_context_compilation(
+                                compiled.total_tokens as u64,
+                                compiled.naive_token_estimate,
+                        );
+                        (StatusCode::OK, Json(compiled)).into_response()
+                }
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        }
 }
 
 async fn get_agent_configs(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -1180,8 +1321,31 @@ async fn get_proactive_risk(
 	let graph = state.autonomous.lock().await.dependency_graph.clone();
 	let dna = state.code_dna.lock().await.clone();
 	let git = state.git_insights.lock().await.clone();
+	let blast = compute_blast_radius(
+		&graph.edges_in,
+		&query.file,
+		std::env::var("MEMIX_MAX_BLAST_RADIUS_DEPTH")
+			.ok()
+			.and_then(|value| value.parse().ok())
+			.unwrap_or(5),
+	);
+	let warning = ProactiveWarner::assess_risk(&query.file, &entries, &graph, &dna, &git).map(|mut warning| {
+		let blast_depth_boost = (blast.affected_count.min(25) as f32 / 25.0) * 0.25;
+		warning.dependents = warning.dependents.max(blast.affected_count);
+		warning.risk_score = (warning.risk_score + blast_depth_boost).min(1.0);
+		if blast.affected_count > 0 {
+			let chain = blast.critical_path.join(" -> ");
+			warning.recommendation = format!(
+				"{} Critical path: {}",
+				warning.recommendation,
+				chain
+			);
+		}
+		warning
+	});
 	(StatusCode::OK, Json(serde_json::json!({
-		"warning": ProactiveWarner::assess_risk(&query.file, &entries, &graph, &dna, &git)
+		"warning": warning,
+		"blast_radius": blast
 	}))).into_response()
 }
 
@@ -1276,42 +1440,50 @@ async fn get_impact(
     Path(file): Path<String>,
 ) -> Result<Json<ImpactAnalysis>, StatusCode> {
     let autonomous = state.autonomous.lock().await;
-    
-    let impact = autonomous.dependency_graph.edges_in
-        .get(&file)
-        .map(|dependents| {
-            let impacted: Vec<crate::intelligence::autonomous::ImpactedFile> = dependents
-                .iter()
-                .map(|p| crate::intelligence::autonomous::ImpactedFile {
-                    path: p.clone(),
-                    line: None,
-                    reason: format!("{} depends on {}", p, file),
-                    urgency: crate::intelligence::autonomous::ImpactSeverity::Medium,
-                })
-                .collect();
-            
-            let impacted_len = impacted.len();
-            ImpactAnalysis {
-                file: file.clone(),
-                change_type: crate::intelligence::autonomous::ChangeType::FunctionModified,
-                severity: if impacted_len > 5 {
-                    crate::intelligence::autonomous::ImpactSeverity::High
-                } else {
-                    crate::intelligence::autonomous::ImpactSeverity::Medium
-                },
-                impacted_files: impacted,
-                recommendations: vec![format!("{} files depend on this", impacted_len)],
-                risk_score: (impacted_len as f32 / 10.0).min(1.0),
-            }
-        })
-        .unwrap_or_else(|| ImpactAnalysis {
+    let blast = compute_blast_radius(&autonomous.dependency_graph.edges_in, &file, 5);
+
+    let impact = if blast.affected_count == 0 {
+        ImpactAnalysis {
             file: file.clone(),
             change_type: crate::intelligence::autonomous::ChangeType::FunctionModified,
             severity: crate::intelligence::autonomous::ImpactSeverity::None,
             impacted_files: vec![],
             recommendations: vec!["No dependencies found".to_string()],
             risk_score: 0.0,
-        });
+        }
+    } else {
+        let impacted: Vec<crate::intelligence::autonomous::ImpactedFile> = blast
+            .affected_files
+            .iter()
+            .map(|entry| crate::intelligence::autonomous::ImpactedFile {
+                path: entry.path.clone(),
+                line: None,
+                reason: format!("Reached via {}", entry.via),
+                urgency: if entry.depth <= 1 {
+                    crate::intelligence::autonomous::ImpactSeverity::High
+                } else {
+                    crate::intelligence::autonomous::ImpactSeverity::Medium
+                },
+            })
+            .collect();
+
+        ImpactAnalysis {
+            file: file.clone(),
+            change_type: crate::intelligence::autonomous::ChangeType::FunctionModified,
+            severity: if blast.affected_count > 5 {
+                crate::intelligence::autonomous::ImpactSeverity::High
+            } else {
+                crate::intelligence::autonomous::ImpactSeverity::Medium
+            },
+            impacted_files: impacted,
+            recommendations: vec![format!(
+                "{} files depend on this. Critical path: {}",
+                blast.affected_count,
+                blast.critical_path.join(" -> ")
+            )],
+            risk_score: (blast.affected_count as f32 / 10.0).min(1.0),
+        }
+    };
 
     Ok(Json(impact))
 }
@@ -1408,4 +1580,45 @@ async fn team_sync(
             report.team_id
         )
     })))
+}
+
+async fn get_token_stats(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let session = state.token_tracker.get_session();
+    let lifetime = state.token_tracker.get_lifetime().await;
+    let cache_efficiency_pct = if session.embedding_cache_hits + session.embedding_cache_misses > 0 {
+        (session.embedding_cache_hits as f64 / (session.embedding_cache_hits + session.embedding_cache_misses) as f64) * 100.0
+    } else {
+        0.0
+    };
+    let compression_ratio = if session.context_tokens_compiled > 0 {
+        ((session.context_tokens_compiled + session.estimated_tokens_saved) as f64) / session.context_tokens_compiled as f64
+    } else {
+        1.0
+    };
+    
+    let stats = crate::token::tracker::TokenStatsResponse {
+        session,
+        lifetime,
+        cache_efficiency_pct,
+        compression_ratio,
+    };
+    
+    (StatusCode::OK, Json(stats)).into_response()
+}
+
+#[derive(Deserialize)]
+struct TokenUsagePayload {
+    tokens: u64,
+    #[allow(dead_code)]
+    task_type: Option<String>,
+}
+
+async fn record_ai_token_use(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<TokenUsagePayload>,
+) -> impl IntoResponse {
+    state.token_tracker.session.record_ai_call(payload.tokens);
+    StatusCode::OK.into_response()
 }

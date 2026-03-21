@@ -63,9 +63,7 @@ impl AutonomousPairProgrammer {
     }
 
     pub fn update_dependency_graph(&mut self, file: &str, imports: &[String]) {
-        for import in imports {
-            self.dependency_graph.add_dependency(file, import);
-        }
+        self.dependency_graph.set_dependencies(file, imports);
     }
 
     pub fn analyze_impact(&self, file: &str, diff: &SemanticDiff) -> ImpactAnalysis {

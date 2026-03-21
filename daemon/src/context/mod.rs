@@ -44,6 +44,7 @@ pub struct CompilePassMetrics {
 pub struct CompiledContext {
     pub budget: usize,
     pub total_tokens: usize,
+    pub naive_token_estimate: u64,
     pub explainability_summary: String,
     pub selected_sections: Vec<CompiledSection>,
     pub omitted_section_ids: Vec<String>,
@@ -90,11 +91,13 @@ impl ContextCompiler {
         history: &[FlightRecord],
         brain_entries: &[MemoryEntry],
         skeleton_entries: &[MemoryEntry],
+        causal_context: Option<String>,
     ) -> Result<CompiledContext> {
         if request.token_budget == 0 {
             return Ok(CompiledContext {
                 budget: 0,
                 total_tokens: 0,
+                naive_token_estimate: 0,
                 explainability_summary: "Zero token budget requested".to_string(),
                 selected_sections: vec![],
                 omitted_section_ids: vec![],
@@ -117,6 +120,14 @@ impl ContextCompiler {
             graph,
             request.max_depth.unwrap_or(2),
         );
+
+        let naive_estimate = relevant_files.iter()
+            .filter_map(|rf| std::fs::metadata(&rf.path).ok())
+            .map(|meta| {
+                (meta.len() as f64 * 0.25) as u64
+            })
+            .sum::<u64>();
+
         let skeletons = self.pass_skeleton_extraction(&request.active_file, &relevant_files)?;
         let (deduplicated_skeletons, deduplicated_files) =
             self.pass_brain_dedup(skeletons, brain_entries);
@@ -124,43 +135,43 @@ impl ContextCompiler {
         let rules_sections = self.pass_rules_pruning(&task_type);
         let ranked_sections = self.pass_priority_ranking(
             &request.active_file,
+            graph,
             &task_type,
             deduplicated_skeletons,
             history_sections,
             rules_sections,
             skeleton_entries,
+            causal_context,
         )?;
+        let ranked_sections_count = ranked_sections.len();
         let (selected_sections, omitted_section_ids, total_tokens) =
             self.pass_budget_fitting(ranked_sections, request.token_budget)?;
         let metrics = CompilePassMetrics {
             relevant_files: relevant_files.len(),
             skeletons_built: selected_sections
                 .iter()
-                .filter(|section| section.kind == "code-skeleton")
-                .count()
-                + omitted_section_ids
-                    .iter()
-                    .filter(|id| id.starts_with("code:"))
-                    .count(),
+                .filter(|s| s.kind == "Skeleton")
+                .count(),
             skeleton_index_sections: selected_sections
                 .iter()
-                .filter(|section| section.kind == "skeleton-fsi" || section.kind == "skeleton-fusi")
+                .filter(|s| s.kind == "SkeletonIndex")
                 .count(),
             deduplicated_files,
             history_sections: selected_sections
                 .iter()
-                .filter(|section| section.kind == "history")
+                .filter(|s| s.kind == "history")
                 .count(),
             rules_sections: selected_sections
                 .iter()
-                .filter(|section| section.kind == "rules")
+                .filter(|s| s.kind == "rules")
                 .count(),
-            ranked_sections: selected_sections.len() + omitted_section_ids.len(),
+            ranked_sections: ranked_sections_count,
             fitted_sections: selected_sections.len(),
         };
         Ok(CompiledContext {
             budget: request.token_budget,
             total_tokens,
+            naive_token_estimate: naive_estimate,
             explainability_summary: format!(
                 "Compiled {} context sections from {} relevant files for {:?} under a {} token budget",
                 selected_sections.len(),
@@ -357,21 +368,42 @@ impl ContextCompiler {
     fn pass_priority_ranking(
         &self,
         active_file: &str,
+        graph: &DependencyGraph,
         task_type: &TaskType,
         skeletons: Vec<CodeSkeleton>,
         history_sections: Vec<(String, String, u8)>,
         rules_sections: Vec<(String, String, u8)>,
         skeleton_entries: &[MemoryEntry],
+        causal_context: Option<String>,
     ) -> Result<Vec<CompiledSection>> {
         let mut sections = Vec::new();
+
+        let importance = graph.importance_scores(0);
         sections.push(compiled_section(
             "active:file".to_string(),
             "active-context".to_string(),
             100,
             format!("Active file: {}\nTask type: {:?}", active_file, task_type),
         )?);
+        if let Some(causal_context) = causal_context {
+            sections.push(compiled_section(
+                format!("causal:{}", active_file),
+                "causal-chain".to_string(),
+                95,
+                causal_context,
+            )?);
+        }
         for skeleton in skeletons {
-            let priority = if skeleton.path == active_file { 95 } else { 72 };
+            let base_priority: u8 = if skeleton.path == active_file { 95 } else { 72 };
+            let betweenness = importance.betweenness.get(&skeleton.path).copied().unwrap_or(0.0);
+            let pagerank = importance.pagerank.get(&skeleton.path).copied().unwrap_or(0.0);
+            let combined = (betweenness * 0.7) + (pagerank * 0.3);
+            let boost = (combined * 15.0).round() as i32;
+            let priority = if boost > 0 {
+                base_priority.saturating_add(boost as u8).min(100)
+            } else {
+                base_priority
+            };
             sections.push(compiled_section(
                 format!("code:{}", skeleton.path),
                 "code-skeleton".to_string(),

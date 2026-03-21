@@ -56,6 +56,14 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 fastembed = { version = "3", default-features = false, features = ["ort-load-dynamic"] }
 ort-sys = "=2.0.0-rc.4"
 mini-moka = "0.10.3"
+petgraph = "0.6"
+oxc_parser = "0.121"
+oxc_semantic = "0.121"
+oxc_resolver = "11.19"
+oxc_span = "0.121"
+oxc_allocator = "0.121"
+oxc_ast = "0.121.0"
+walkdir = "2"
 
 
 [profile.release]
