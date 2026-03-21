@@ -1118,7 +1118,7 @@ async fn purge_project(
 async fn daemon_status() -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "status": "healthy",
-        "version": "0.2.2-beta",
+        "version": "0.2.3-beta",
         "features": [
             "autonomous_watching",
             "semantic_diff",

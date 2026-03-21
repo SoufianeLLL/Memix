@@ -2,7 +2,7 @@
 	"name": "memix",
 	"displayName": "Memix - AI Memory Bridge",
 	"description": "An autonomous coding intelligence layer that OBSERVES, UNDERSTANDS, PREDICTS, and REMEMBERS — independently of the AI model. Works with VS Code, Cursor, Windsurf, Antigravity, and Claude Code.",
-	"version": "1.0.7-beta",
+	"version": "1.0.8-beta",
 	"publisher": "digitalvizellc",
 	"engines": {
 		"vscode": "^1.107.0"
