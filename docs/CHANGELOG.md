@@ -4,12 +4,26 @@ All notable changes to the "memix" extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [1.0.7-beta] - 2026-03-20 (Code Skeleton Index + Panel Enhancements)
+## [1.0.8-beta] - 2026-03-21 (Token Intelligence Panel)
+### Features
+- **Token Intelligence Debug Panel**: New "Token Intelligence" section in Advanced tab displaying session and lifetime token metrics
+  - Session stats: AI Tokens consumed, Context tokens compiled, Tokens saved, Files indexed, Context compilations, Embedding cache efficiency, Compression ratio
+  - Lifetime stats: Total AI tokens, Total tokens saved, Sessions recorded
+- **Token Stats API Integration**: Extension now fetches token statistics from daemon `/api/v1/tokens/stats` and renders in real-time
+
+## [1.0.7-beta] - 2026-03-20 (Structural Intelligence Layer)
 ### Features
 - **Code Skeleton Index (FSI/FuSI)**: Live structural map of the codebase — File Skeleton Index gives per-file architecture summaries, Function Symbol Index gives per-function call/caller details. Stored in an isolated Redis hash with LRU eviction (separate from brain entries).
 - **CallGraph Engine**: In-memory call graph rebuilt incrementally on file saves, powering the FuSI layer with `calls_from` / `callers_of` queries.
 - **Skeleton-Aware Context Compiler**: FSI sections injected at priority 85, FuSI at priority 78 into the context compilation pipeline. Structural context now competes fairly with other sources in the DP knapsack budget fitting.
 - **Skeleton Stats API**: `GET /api/v1/skeleton/stats/:project_id` returns FSI, FuSI, and total counts.
+- **Embedding Store**: Write-through hybrid persistence with local binary file (`.memix/skeleton_embeddings.bin`) as fast read path, Redis hash as cross-IDE synchronization layer.
+- **Background Indexer**: Startup workspace scan at configurable rate (default 10 files/sec), skips if index already populated, populates FSI + embeddings for entire project.
+- **Dependency Graph v2**: `set_dependencies` for atomic edge replacement, petgraph integration for betweenness centrality, PageRank, SCC cycle detection, and topological ordering.
+- **Blast Radius Analysis**: BFS-based forward transitive impact analysis with cycle-safe critical path reconstruction.
+- **OXC Semantic Analysis**: Layer 2 enrichment for TS/JS with scope analysis, resolved import paths, dead import detection, call target resolution with source cache.
+- **Naive Token Estimate**: Context compiler reports what a naive paste approach would have cost, enabling compression ratio calculation.
+- **AGENTS.md Generation**: Rules file writer now generates `AGENTS.md` for workspace-root placement.
 
 ### Configuration
 - **Environment-Driven Safeguards**: All skeleton limits (`MAX_FUNCTIONS_PER_FILE`, `MAX_TYPES_PER_FILE`, `MAX_IMPORTS_PER_FILE`, `MAX_DEPS_PER_FILE`, `MAX_HOT_FILES`, `MAX_SYMBOLS_PER_HOT_FILE`, `MAX_SKELETON_ENTRIES`, `FSI_DEBOUNCE_SECS`) are now configurable via `.env` with `MEMIX_*` prefix and safe fallback defaults.

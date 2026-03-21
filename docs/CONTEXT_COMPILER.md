@@ -2,86 +2,67 @@
 
 ## Overview
 
-The **Context Compiler** is the daemon's core intelligence engine for building AI-ready context. It takes a token budget and produces a prioritized, deduplicated set of context sections that fit within that budget, maximizing information value.
+The **Context Compiler** is the daemon's core intelligence engine for building AI-ready context packets. It accepts a token budget and active file, traverses the structural indexes, and produces a prioritized, deduplicated set of context sections that fit within that budget — maximizing information value per token spent.
+
+The compiler is the bridge between the daemon's rich structural knowledge (dependency graph, skeleton index, brain entries, session history, call graph, importance scores) and the lean context window that an AI model actually receives. Its output is the answer to the question: "given everything Memix knows about this project right now, what is the most valuable subset that fits in N tokens?"
 
 ## Problem & Solution
 
 ### Problem
-AI models have limited context windows. Naively injecting all available information wastes tokens on irrelevant data, while being too selective causes the AI to miss critical context.
+
+Naively injecting all available information wastes tokens on irrelevant context, while being too selective causes the AI to miss critical structural relationships. Neither extreme serves the developer well, and both get worse as the project grows.
 
 ### Solution
-A 7-pass compilation pipeline that:
-1. Eliminates dead context (unreachable files)
-2. Builds code skeletons (structural summaries)
-3. Deduplicates against existing brain entries
-4. Compacts session history
-5. Prunes rules to task-relevant sections
-6. Injects skeleton index entries (FSI/FuSI)
-7. Uses dynamic-programming knapsack for optimal budget allocation
 
-## Pipeline Passes
+A seven-pass compilation pipeline that progressively refines the candidate context from the full project graph down to a precisely budget-fitted set of sections. Each pass has a specific, bounded responsibility, and the passes are designed so that earlier passes reduce the work required by later ones.
 
-### Pass 1: Dead Context Elimination
-BFS walk from the active file through the dependency graph. Only files within `max_depth` hops (default: 2) are considered relevant.
+## The Seven Passes
 
-### Pass 2: Skeleton Extraction
-For each relevant file, the AST parser extracts function signatures, types, and exports. The active file additionally includes the 2 most complex function bodies.
+**Pass 1 — Dead Context Elimination** performs a BFS walk from the active file through the dependency graph, collecting all files reachable within `max_depth` hops (default 2). Files that have no path to the active file through imports or reverse-imports are excluded entirely. This pass also computes the `naive_token_estimate` — the sum of each relevant file's byte size multiplied by a 0.25 tokens-per-byte heuristic. This estimate represents what a developer would spend if they simply pasted every relevant file verbatim, and is used downstream to calculate tokens saved.
 
-### Pass 3: Brain Dedup
-Skeletons whose content is already well-covered by brain entries (≥3 coverage hits) are truncated to save tokens.
+**Pass 2 — Skeleton Extraction** uses the AST parser to build a `CodeSkeleton` for each relevant file, capturing function signatures, type declarations, and exports. For the active file specifically, the two most complex functions (by cyclomatic complexity) have their full bodies included rather than just their signatures. This gives the AI enough detail to reason about the specific function under development while keeping all other files at summary level.
 
-### Pass 4: History Compaction
-Session history is split into an older summary (aggregate stats) and recent timeline (last 4 events), each as a separate section.
+**Pass 3 — Brain Deduplication** checks each skeleton against the existing brain entries for the project. Skeletons whose content is substantially covered by three or more brain entries are truncated to a summary, on the principle that the AI should not receive the same information from two sources simultaneously. This pass reduces token usage on well-documented files while preserving detail for files the brain doesn't yet know about.
 
-### Pass 5: Rules Pruning
-Rule files (AGENTS.md, .windsurfrules) are filtered to lines matching task-type keywords (e.g., "pattern" for refactoring).
+**Pass 4 — History Compaction** processes the session's flight recorder events into two distinct sections: a recent timeline covering the last four events (which preserves specificity about very recent actions) and an older aggregate summary (which preserves the count and pattern of earlier activity without repeating all the details). Keeping these as separate sections allows the budget-fitting pass to selectively include one or both based on available budget.
 
-### Pass 6: Skeleton Index Injection
-FSI and FuSI entries from the Redis skeleton hash are injected as ranked sections:
+**Pass 5 — Rules Pruning** reads the workspace's rule files (AGENTS.md, .windsurfrules, and similar) and filters their content to lines that match task-type keywords. A bug-fix task sees warning, issue, debug, and safety lines; a refactor task sees dependency, decision, pattern, and architecture lines. This ensures the AI receives focused guidance rather than the entire rulebook, and is especially useful as project rule files grow over time.
 
-| Section Type | Priority | Description |
-|-------------|----------|-------------|
-| `skeleton-fsi` | 85 | File-level structural summary |
-| `skeleton-fusi` | 78 | Function-level symbol detail |
+**Pass 6 — Skeleton Index Injection** fetches FSI and FuSI entries from the skeleton Redis hash and adds them as ranked sections. FSI entries receive priority 85 and FuSI entries receive priority 78. Structural importance scores from the petgraph analysis are also applied here: files with high betweenness centrality and PageRank receive a priority boost of up to 15 points, ensuring load-bearing files in the dependency graph are more likely to survive budget fitting.
 
-### Pass 7: Budget Fitting (DP Knapsack)
-All ranked sections compete for the token budget using a 0/1 knapsack algorithm that maximizes `priority × 100` value per token spent.
+**Pass 7 — Budget Fitting (0/1 Knapsack)** solves the optimal section selection problem using dynamic programming. Each section has a token cost and a priority score; the knapsack algorithm maximizes total `priority × 100` value subject to the total token budget constraint. Sections not selected are tracked in `omitted_section_ids` for transparency. The algorithm is exact (not greedy), which matters at small budgets where a greedy approach might pick several medium-priority sections that together prevent a single high-priority section from fitting.
 
 ## Priority Hierarchy
 
-| Section Kind | Priority | Meaning |
-|-------------|----------|---------|
-| `active-context` | 100 | Active file + task type |
-| `code-skeleton` (active) | 95 | Code skeleton of active file |
-| `skeleton-fsi` | 85 | File Skeleton Index entry |
-| `skeleton-fusi` | 78 | Function Symbol Index entry |
-| `history:recent` | 80 | Recent session events |
-| `code-skeleton` (dep) | 72 | Code skeleton of dependency |
-| `rules` | 70 | Project rules/conventions |
-| `history:summary` | 55 | Older session summary |
+The priority values determine relative importance during the knapsack pass. When budget is tight, higher-priority sections are selected first.
+
+| Section Kind | Priority | Rationale |
+|---|---|---|
+| `active-context` | 100 | Always included — the active file and task framing |
+| `code-skeleton` (active file) | 95 | Full structural detail for the file being edited |
+| `causal-chain` | 95 | Call chain context when available |
+| `skeleton-fsi` (importance-boosted) | Up to 100 | High-betweenness files get boosted |
+| `skeleton-fsi` (baseline) | 85 | File-level structural summary |
+| `history:recent` | 80 | Last 4 session events |
+| `skeleton-fusi` | 78 | Function-level symbol detail |
+| `code-skeleton` (dependency) | 72 | Dependency structural summaries |
+| `rules` | 70 | Pruned project conventions |
+| `history:summary` | 55 | Older session aggregate |
+
+## Naive Token Estimate and Compression Ratio
+
+Every compiled context response includes a `naive_token_estimate` field alongside `total_tokens`. This estimate is the sum of byte-to-token conversions for all files in the dependency frontier — the token cost of just pasting all relevant files verbatim. The ratio of `naive_token_estimate / total_tokens` is the compression ratio: how much more token-efficient the compiled context is versus the naive approach.
+
+This ratio feeds directly into the Token Intelligence system. The difference between the naive estimate and the actual compiled token count is recorded as `estimated_tokens_saved`, which accumulates into both the session and lifetime totals visible in the debug panel.
 
 ## Metrics
 
-The compiler returns `CompilePassMetrics` including:
-- `relevant_files` — files within dependency reach
-- `skeletons_built` — code-skeleton sections (filesystem-based)
-- `skeleton_index_sections` — FSI/FuSI sections from Redis
-- `deduplicated_files` — files trimmed due to brain coverage
-- `fitted_sections` — sections selected within budget
+Every compilation returns a `CompilePassMetrics` struct with: the number of relevant files discovered, code-skeleton sections built from the filesystem, skeleton index sections injected from Redis, files trimmed by brain dedup, history sections included, rules sections included, total sections ranked, and total sections fitted within budget. These metrics are surfaced in the debug panel under the Compiled Context section.
 
 ## Key File
 
-`daemon/src/context/mod.rs` — the entire compiler implementation.
+`daemon/src/context/mod.rs` — the complete compiler implementation including all seven passes, the knapsack algorithm, skeleton rendering, and the rules pruning keyword tables.
 
 ## API Endpoint
 
-`POST /api/v1/context/compile` with body:
-```json
-{
-  "project_id": "my-project",
-  "active_file": "/path/to/file.ts",
-  "token_budget": 4000,
-  "task_type": "bugfix",
-  "max_depth": 2
-}
-```
+`POST /api/v1/context/compile` accepts a JSON body with `project_id`, `active_file`, `token_budget`, an optional `task_type` (newfeature, bugfix, refactor, codereview), and an optional `max_depth`. It returns a `CompiledContext` with `budget`, `total_tokens`, `naive_token_estimate`, `explainability_summary`, `selected_sections`, `omitted_section_ids`, and `metrics`.

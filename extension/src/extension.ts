@@ -227,6 +227,60 @@ export async function activate(context: vscode.ExtensionContext) {
 	}
 
 	// =====================================================================
+	// BLAST RADIUS PREDICTION WATCHER
+	// =====================================================================
+	let blastRadiusTimeout: NodeJS.Timeout | null = null;
+	const shownBlastRadiusInfos = new Set<string>();
+	let blastRadiusStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
+	blastRadiusStatusBar.command = 'memix.showPanel';
+	blastRadiusStatusBar.tooltip = 'Memix Blast Radius Prediction';
+	context.subscriptions.push(blastRadiusStatusBar);
+
+	context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(async (e) => {
+		if (!projectId || !workspaceRoot || !e.document.uri.fsPath.startsWith(workspaceRoot)) return;
+		if (e.document.uri.scheme !== 'file') return;
+		
+		const filePath = e.document.uri.fsPath;
+		
+		// If we already showed a warning for this file recently, skip to prevent spam
+		if (shownBlastRadiusInfos.has(filePath)) return;
+
+		if (blastRadiusTimeout) clearTimeout(blastRadiusTimeout);
+		blastRadiusTimeout = setTimeout(async () => {
+			try {
+				const data = await MemoryClient.getBlastRadius(filePath, 5);
+				
+				// Show a warning if it affects more than 5 nodes
+				if (data.affected_count && data.affected_count >= 5) {
+					shownBlastRadiusInfos.add(filePath);
+					// auto-clear the warning skip after 5 minutes so it can warn again later if needed
+					setTimeout(() => shownBlastRadiusInfos.delete(filePath), 5 * 60 * 1000);
+					
+					blastRadiusStatusBar.text = `$(warning) Effects: ${data.affected_count} files`;
+					blastRadiusStatusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+					blastRadiusStatusBar.show();
+
+					const action = await vscode.window.showWarningMessage(
+						`⚠️ Editing ${path.basename(filePath)} affects ${data.affected_count} files across your project.`,
+						'View Details'
+					);
+					if (action === 'View Details') {
+						vscode.commands.executeCommand('memix.showPanel');
+						panelProvider?.getWebView()?.postMessage({
+							command: 'showBlastRadius',
+							data: data
+						});
+					}
+				} else {
+					blastRadiusStatusBar.hide();
+				}
+			} catch (err) {
+				// Ignore if daemon is down or unreachable
+			}
+		}, 1500); // 1.5 second debounce
+	}));
+
+	// =====================================================================
 	// COMMANDS — always registered so VS Code never says "command not found"
 	// =====================================================================
 

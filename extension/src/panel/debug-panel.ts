@@ -560,18 +560,23 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 			let agentReports: any = null;
 			let compiledContext: any = null;
 			let proactiveRisk: any = null;
+			let importanceData: any = null;
+			let blastRadius: any = null;
+			let causalChain: any = null;
 			let promptOptimization: any = null;
 			let modelPerformance: any = null;
 			let developerProfile: any = null;
 			let hierarchyIdentity: any = null;
+			let tokenStats: any = null;
 			if (includeAdvanced) {
-				const [dnaRes, dnaOtelRes, intentRes, gitRes, agentConfigRes, agentReportsRes] = await Promise.allSettled([
+				const [dnaRes, dnaOtelRes, intentRes, gitRes, agentConfigRes, agentReportsRes, tokenStatsRes] = await Promise.allSettled([
 					MemoryClient.getObserverDna(),
 					MemoryClient.getObserverDnaOtel(),
 					MemoryClient.getObserverIntent(),
 					MemoryClient.getObserverGit(),
 					MemoryClient.getAgentConfigs(),
 					MemoryClient.getAgentReports(),
+					MemoryClient.getTokenStats(),
 				]);
 				observerDna = dnaRes.status === 'fulfilled' ? dnaRes.value : null;
 				observerDnaOtel = dnaOtelRes.status === 'fulfilled' ? dnaOtelRes.value : null;
@@ -579,6 +584,7 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				observerGit = gitRes.status === 'fulfilled' ? gitRes.value : null;
 				agentConfig = agentConfigRes.status === 'fulfilled' ? agentConfigRes.value : null;
 				agentReports = agentReportsRes.status === 'fulfilled' ? agentReportsRes.value : null;
+				tokenStats = tokenStatsRes.status === 'fulfilled' ? tokenStatsRes.value : null;
 			}
 			const inferredTaskType = (() => {
 				const daemonIntent = String(observerIntent?.intent_type || '').toLowerCase();
@@ -594,12 +600,21 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 			})();
 			const compileBudget = this.promptPackVariant === 'Small' ? 1200 : this.promptPackVariant === 'Deep' ? 4000 : 2400;
 			if (includeAdvanced && activeFile) {
-				const [compiledContextRes, proactiveRiskRes] = await Promise.allSettled([
+				const [compiledContextRes, proactiveRiskRes, importanceRes, blastRadiusRes, causalChainRes] = await Promise.allSettled([
 					MemoryClient.compileContext(projectId, activeFile, compileBudget, inferredTaskType),
 					MemoryClient.getProactiveRisk(projectId, activeFile),
+					MemoryClient.getImportance(10),
+					MemoryClient.getBlastRadius(activeFile),
+					MemoryClient.getCausalChain(activeFile),
 				]);
 				compiledContext = compiledContextRes.status === 'fulfilled' ? compiledContextRes.value : null;
-				proactiveRisk = proactiveRiskRes.status === 'fulfilled' ? proactiveRiskRes.value : null;
+				const proactiveEnvelope = proactiveRiskRes.status === 'fulfilled' ? proactiveRiskRes.value : null;
+				proactiveRisk = proactiveEnvelope?.warning || null;
+				importanceData = importanceRes.status === 'fulfilled' ? importanceRes.value : null;
+				blastRadius = blastRadiusRes.status === 'fulfilled'
+					? blastRadiusRes.value
+					: (proactiveEnvelope?.blast_radius || null);
+				causalChain = causalChainRes.status === 'fulfilled' ? causalChainRes.value : null;
 			}
 			if (includeAdvanced) {
 				const [promptOptimizationRes, modelPerformanceRes, developerProfileRes, hierarchyIdentityRes] = await Promise.allSettled([
@@ -706,12 +721,16 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 						observerGit,
 						agentConfig,
 						agentReports,
+						importanceData,
+						blastRadius,
+						causalChain,
 						compiledContext,
 						proactiveRisk,
 						promptOptimization,
 						modelPerformance,
 						developerProfile,
-						hierarchyIdentity
+						hierarchyIdentity,
+						tokenStats
 					} : {})
 				}
 			});
@@ -862,6 +881,51 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				</div>
 			</div>
 			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Token Intelligence</h3>
+				<div class="stat">
+					<span>Session AI Tokens</span>
+					<span id="token-session-ai" class="stat-value">—</span>
+				</div>
+				<div class="stat">
+					<span>Context Compiled</span>
+					<span id="token-session-compiled" class="stat-value">—</span>
+				</div>
+				<div class="stat">
+					<span>Tokens Saved</span>
+					<span id="token-session-saved" class="stat-value">—</span>
+				</div>
+				<div class="stat">
+					<span>Files Indexed</span>
+					<span id="token-session-files" class="stat-value">—</span>
+				</div>
+				<div class="stat">
+					<span>Context Compilations</span>
+					<span id="token-session-compilations" class="stat-value">—</span>
+				</div>
+				<div class="stat">
+					<span>Cache Efficiency</span>
+					<span id="token-cache-efficiency" class="stat-value">—</span>
+				</div>
+				<div class="stat">
+					<span>Compression Ratio</span>
+					<span id="token-compression-ratio" class="stat-value">—</span>
+				</div>
+				<div class="mt-3 pt-3 border-t border-[--vscode-panel-border]" style="opacity:0.8">
+					<div class="stat" style="font-size:11px">
+						<span>Lifetime AI Tokens</span>
+						<span id="token-lifetime-ai" class="stat-value">—</span>
+					</div>
+					<div class="stat" style="font-size:11px">
+						<span>Lifetime Saved</span>
+						<span id="token-lifetime-saved" class="stat-value">—</span>
+					</div>
+					<div class="stat" style="font-size:11px">
+						<span>Sessions</span>
+						<span id="token-lifetime-sessions" class="stat-value">—</span>
+					</div>
+				</div>
+			</div>
+			<div class="w-full py-8 px-3 border-b border-bottom">
 				<h3 class="text-base font-semibold mb-2 w-full">Integrity & Freshness</h3>
 				<div class="stat">
 					<span>Required Keys</span>
@@ -962,6 +1026,21 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				</div>
 				<div id="observer-git-authors" style="margin-top:6px;color:var(--vscode-descriptionForeground)">No archaeology snapshot</div>
 				<div id="observer-git-hot-files" style="margin-top:6px"></div>
+			</div>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Architecture X-Ray</h3>
+				<div id="importance-summary" style="color:var(--vscode-descriptionForeground)">No structural graph data</div>
+				<div id="importance-top-files" style="margin-top:6px"></div>
+			</div>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Blast Radius</h3>
+				<div id="blast-radius-summary" style="color:var(--vscode-descriptionForeground)">No blast radius available</div>
+				<div id="blast-radius-details" style="margin-top:6px"></div>
+			</div>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full">Causal Chain</h3>
+				<div id="causal-chain-summary" style="color:var(--vscode-descriptionForeground)">No causal chain available</div>
+				<div id="causal-chain-details" style="margin-top:6px"></div>
 			</div>
 			<div class="w-full py-8 px-3 border-b border-bottom">
 				<h3 class="text-base font-semibold mb-2 w-full">Daemon Agents</h3>
@@ -1562,6 +1641,42 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				return;
 			}
 
+			if (command === 'showBlastRadius') {
+				var modalKind = 'blast_radius';
+				var modalTitle = 'Blast Radius Warning';
+				var modalSubtitle = 'This change has a substantial impact on your project.';
+
+				var listHtml = (data.affected || []).slice(0, 50).map(function(f) { 
+					var shortVia = f.via ? f.via.split('/').pop() : 'Direct';
+					return '<li><span class="file-link" style="color:var(--vscode-textLink-foreground); cursor:pointer;" onclick="vscode.postMessage({command: \\'openPath\\', path: \\'' + f.path.replace(/\\'/g, "\\\\'") + '\\'})">' + f.path + '</span> <span style="opacity:0.6">(via ' + shortVia + ', depth ' + f.depth + ')</span></li>'; 
+				}).join('');
+				
+				if (data.affected && data.affected.length > 50) {
+					listHtml += '<li>...and ' + (data.affected.length - 50) + ' more</li>';
+				}
+
+				var htmlStr = '<div style="margin-bottom: 12px;"><strong>Affected files:</strong> ' + (data.affected_count || 0) + '</div>' + 
+							  '<div style="margin-bottom: 12px;"><strong>Max recursion depth:</strong> ' + (data.max_depth || 0) + '</div>' + 
+							  '<ul style="margin:0; padding-left: 20px; max-height: 250px; overflow-y: auto; font-family: monospace; font-size: 11px;">' + 
+							  listHtml + '</ul>';
+
+				activeModalKind = modalKind;
+				activeModalPayload = JSON.stringify(data, null, 2);
+
+				var backdrop = byId('payload-modal-backdrop');
+				var titleEl = byId('payload-modal-title');
+				var subtitleEl = byId('payload-modal-subtitle');
+				var bodyEl = byId('payload-modal-body');
+
+				if (titleEl) titleEl.textContent = modalTitle;
+				if (subtitleEl) subtitleEl.textContent = modalSubtitle;
+				if (bodyEl) bodyEl.innerHTML = htmlStr;
+				if (backdrop) backdrop.hidden = false;
+
+				if (spinnerActive) hideLoading();
+				return;
+			}
+
 			if (command === 'settingsData') {
 				var configPayload = data?.config || data || {};
 				var configPath = data?.config_path || data?.configPath || '';
@@ -1746,6 +1861,49 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 					if (mp) mp.textContent = data.metrics.patterns;
 					var mw = byId('metric-warnings');
 					if (mw) mw.textContent = data.metrics.warnings;
+				}
+
+				// Token Intelligence rendering
+				if (data.tokenStats) {
+					var ts = data.tokenStats;
+					var session = ts.session || {};
+					var lifetime = ts.lifetime || {};
+					
+					var tsa = byId('token-session-ai');
+					if (tsa) tsa.textContent = (session.ai_tokens_consumed || 0).toLocaleString();
+					
+					var tsc = byId('token-session-compiled');
+					if (tsc) tsc.textContent = (session.context_tokens_compiled || 0).toLocaleString();
+					
+					var tss = byId('token-session-saved');
+					if (tss) tss.textContent = (session.estimated_tokens_saved || 0).toLocaleString();
+					
+					var tsf = byId('token-session-files');
+					if (tsf) tsf.textContent = (session.files_indexed || 0).toLocaleString();
+					
+					var tscomp = byId('token-session-compilations');
+					if (tscomp) tscomp.textContent = (session.context_compilations || 0).toLocaleString();
+					
+					var tce = byId('token-cache-efficiency');
+					if (tce) {
+						var ce = typeof ts.cache_efficiency_pct === 'number' ? ts.cache_efficiency_pct : 0;
+						tce.textContent = ce.toFixed(1) + '%';
+					}
+					
+					var tcr = byId('token-compression-ratio');
+					if (tcr) {
+						var cr = typeof ts.compression_ratio === 'number' ? ts.compression_ratio : 1.0;
+						tcr.textContent = cr.toFixed(2) + 'x';
+					}
+					
+					var tla = byId('token-lifetime-ai');
+					if (tla) tla.textContent = (lifetime.total_ai_tokens_consumed || 0).toLocaleString();
+					
+					var tls = byId('token-lifetime-saved');
+					if (tls) tls.textContent = (lifetime.total_tokens_saved || 0).toLocaleString();
+					
+					var tlss = byId('token-lifetime-sessions');
+					if (tlss) tlss.textContent = (lifetime.sessions_recorded || 0).toLocaleString();
 				}
 
 				var ideEl = byId('ide');
@@ -1981,6 +2139,119 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 							gh += '<div style="margin-bottom:6px"><div style="font-size:11px;line-height:1.3">' + (hf.file_path || '—') + ' <b>(' + (hf.churn_commits || 0) + ')</b></div><div style="font-size:10px;opacity:0.8">' + touch.replace(/^ • /, '') + '</div></div>';
 						}
 						gitHot.innerHTML = gh;
+					}
+				}
+
+				var importance = data.importanceData || null;
+				var importanceSummary = byId('importance-summary');
+				if (importanceSummary) {
+					if (importance && typeof importance.node_count === 'number') {
+						importanceSummary.innerHTML =
+							'<div class="stat"><span>Nodes</span><span>' + importance.node_count + '</span></div>' +
+							'<div class="stat"><span>Cycles</span><span>' + (importance.cycle_count || 0) + '</span></div>' +
+							'<div class="stat"><span>Topo Order</span><span>' + (importance.topological_order_length || 0) + '</span></div>';
+					} else {
+						importanceSummary.textContent = 'No structural graph data';
+					}
+				}
+				var importanceTopFiles = byId('importance-top-files');
+				if (importanceTopFiles) {
+					var topFiles = importance && Array.isArray(importance.top_files) ? importance.top_files : [];
+					var sccGroups = importance && Array.isArray(importance.scc_groups) ? importance.scc_groups : [];
+					if (topFiles.length === 0) {
+						importanceTopFiles.innerHTML = '<div style="color:var(--vscode-descriptionForeground)">No load-bearing files yet</div>';
+					} else {
+						var ixHtml = '<div><b>Load-bearing files</b></div>' + topFiles.slice(0, 5).map(function(item) {
+							var score = Array.isArray(item) ? item[1] : 0;
+							var file = Array.isArray(item) ? item[0] : 'unknown';
+							return '<div class="stat"><span style="max-width:75%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
+								escapeHtml(file) + '</span><span>' + (Number(score || 0).toFixed(2)) + '</span></div>';
+						}).join('');
+						if (sccGroups.length > 0) {
+							ixHtml += '<div style="margin-top:8px;font-size:11px;line-height:1.4"><b>Circular clusters:</b><br/>' +
+								sccGroups.slice(0, 3).map(function(group) { return escapeHtml((group || []).join(' → ')); }).join('<br/>') +
+								'</div>';
+						}
+						importanceTopFiles.innerHTML = ixHtml;
+					}
+				}
+
+				var blast = data.blastRadius || null;
+				var blastSummary = byId('blast-radius-summary');
+				if (blastSummary) {
+					if (blast && typeof blast.affected_count === 'number') {
+						blastSummary.innerHTML =
+							'<div>' + escapeHtml(blast.source || data.activeFile || '—') + '</div>' +
+							'<div class="stat"><span>Affected files</span><span>' + blast.affected_count + '</span></div>' +
+							'<div class="stat"><span>Depth</span><span>' + (blast.max_depth || 0) + '</span></div>';
+					} else {
+						blastSummary.textContent = 'No blast radius available';
+					}
+				}
+				var blastDetails = byId('blast-radius-details');
+				if (blastDetails) {
+					var criticalPath = blast && Array.isArray(blast.critical_path) ? blast.critical_path : [];
+					var affectedFiles = blast && Array.isArray(blast.affected_files) ? blast.affected_files : [];
+					if (criticalPath.length === 0 && affectedFiles.length === 0) {
+						blastDetails.innerHTML = '<div style="color:var(--vscode-descriptionForeground)">No affected dependents detected</div>';
+					} else {
+						var blastHtml = '';
+						if (criticalPath.length > 0) {
+							blastHtml += '<div style="font-size:11px;line-height:1.4"><b>Critical path:</b><br/>' +
+								criticalPath.map(escapeHtml).join(' → ') + '</div>';
+						}
+						if (affectedFiles.length > 0) {
+							blastHtml += '<div style="font-size:11px;line-height:1.4;margin-top:8px"><b>Reach:</b><br/>' +
+								affectedFiles.slice(0, 5).map(function(entry) {
+									return escapeHtml(entry.path || 'unknown') + ' (depth ' + (entry.depth || 0) + ')';
+								}).join('<br/>') + '</div>';
+						}
+						blastDetails.innerHTML = blastHtml;
+					}
+				}
+
+				var causal = data.causalChain || null;
+				var causalSummary = byId('causal-chain-summary');
+				if (causalSummary) {
+					if (causal && Array.isArray(causal.symbols)) {
+						causalSummary.innerHTML =
+							'<div>' + escapeHtml(causal.file || data.activeFile || '—') + '</div>' +
+							'<div class="stat"><span>Symbols</span><span>' + causal.symbols.length + '</span></div>' +
+							'<div class="stat"><span>Outgoing</span><span>' + (causal.total_outgoing_edges || 0) + '</span></div>' +
+							'<div class="stat"><span>Incoming</span><span>' + (causal.total_incoming_edges || 0) + '</span></div>';
+					} else {
+						causalSummary.textContent = 'No causal chain available';
+					}
+				}
+				var causalDetails = byId('causal-chain-details');
+				if (causalDetails) {
+					var symbols = causal && Array.isArray(causal.symbols) ? causal.symbols : [];
+					if (symbols.length === 0) {
+						causalDetails.innerHTML = '<div style="color:var(--vscode-descriptionForeground)">No resolved symbol-level edges yet</div>';
+					} else {
+						causalDetails.innerHTML = symbols.slice(0, 4).map(function(symbolEntry) {
+							var outgoing = Array.isArray(symbolEntry.calls) ? symbolEntry.calls.slice(0, 3) : [];
+							var incoming = Array.isArray(symbolEntry.called_by) ? symbolEntry.called_by.slice(0, 3) : [];
+							var outgoingHtml = outgoing.length > 0
+								? outgoing.map(function(edge) {
+									var target = edge.callee_file
+										? escapeHtml(edge.callee_file) + ' :: ' + escapeHtml(edge.callee_symbol || 'unknown')
+										: escapeHtml(edge.callee_symbol || 'unknown');
+									return target + (edge.callee_line ? ' (line ' + edge.callee_line + ')' : '');
+								}).join('<br/>')
+								: 'none';
+							var incomingHtml = incoming.length > 0
+								? incoming.map(function(edge) {
+									return escapeHtml(edge.caller_file || 'unknown') + ' :: ' + escapeHtml(edge.caller_symbol || 'unknown') +
+										(edge.call_line ? ' (line ' + edge.call_line + ')' : '');
+								}).join('<br/>')
+								: 'none';
+							return '<div style="margin-bottom:10px;font-size:11px;line-height:1.4">' +
+								'<b>' + escapeHtml(symbolEntry.symbol || 'unknown') + '</b>' +
+								'<div style="margin-top:4px"><b>Calls:</b><br/>' + outgoingHtml + '</div>' +
+								'<div style="margin-top:4px"><b>Called by:</b><br/>' + incomingHtml + '</div>' +
+								'</div>';
+						}).join('');
 					}
 				}
 

@@ -231,6 +231,63 @@ export interface ProactiveRiskWarning {
 	recommendation: string;
 }
 
+export interface BlastRadiusAffectedFile {
+	path: string;
+	depth: number;
+	via: string;
+}
+
+export interface BlastRadius {
+	source: string;
+	affected_count: number;
+	affected_files: BlastRadiusAffectedFile[];
+	critical_path: string[];
+	max_depth: number;
+}
+
+export interface ProactiveRiskResponse {
+	warning: ProactiveRiskWarning | null;
+	blast_radius: BlastRadius | null;
+}
+
+export interface ImportanceResponse {
+	top_files: Array<[string, number]>;
+	scc_groups: string[][];
+	circular_files: string[];
+	node_count: number;
+	cycle_count: number;
+	topological_order_length: number;
+	betweenness: Record<string, number>;
+	pagerank: Record<string, number>;
+}
+
+export interface ResolvedCallEdge {
+	callee_file: string;
+	callee_symbol: string;
+	callee_line: number;
+	is_method: boolean;
+}
+
+export interface CallerSite {
+	caller_file: string;
+	caller_symbol: string;
+	call_line: number;
+	is_method: boolean;
+}
+
+export interface SymbolCausalContext {
+	symbol: string;
+	calls: ResolvedCallEdge[];
+	called_by: CallerSite[];
+}
+
+export interface FileCausalContext {
+	file: string;
+	symbols: SymbolCausalContext[];
+	total_outgoing_edges: number;
+	total_incoming_edges: number;
+}
+
 export interface PromptContextSection {
 	section_name: string;
 	tokens: number;
@@ -292,6 +349,25 @@ export interface LicensePendingResponse {
 }
 
 export type LicenseBillingInterval = 'monthly' | 'yearly';
+
+export interface TokenStatsResponse {
+	session: {
+		ai_tokens_consumed: number;
+		context_tokens_compiled: number;
+		estimated_tokens_saved: number;
+		files_skeleton_indexed: number;
+		embedding_cache_hits: number;
+		embedding_cache_misses: number;
+	};
+	lifetime: {
+		ai_tokens_consumed: number;
+		context_tokens_compiled: number;
+		estimated_tokens_saved: number;
+		files_skeleton_indexed: number;
+	};
+	cache_efficiency_pct: number;
+	compression_ratio: number;
+}
 
 export class MemoryClient {
 	static setBaseUrl(url: string | null) {
@@ -979,7 +1055,7 @@ export class MemoryClient {
 		});
 	}
 
-	static async getProactiveRisk(projectId: string, file: string): Promise<ProactiveRiskWarning | null> {
+	static async getProactiveRisk(projectId: string, file: string): Promise<ProactiveRiskResponse> {
 		return new Promise((resolve, reject) => {
 			const query = new URLSearchParams({ project_id: projectId, file });
 			const requestPath = `${API_PREFIX}/proactive/risk?${query.toString()}`;
@@ -991,8 +1067,79 @@ export class MemoryClient {
 				}
 				readResponseBody(res).then((data) => {
 					try {
-						const parsed = JSON.parse(data || '{}');
-						resolve(parsed && parsed.warning ? parsed.warning : null);
+						resolve(JSON.parse(data || '{}'));
+					} catch (e) {
+						reject(e);
+					}
+				}, reject);
+			});
+			req.on('error', reject);
+			req.end();
+		});
+	}
+
+	static async getImportance(topN = 15): Promise<ImportanceResponse> {
+		return new Promise((resolve, reject) => {
+			const query = new URLSearchParams({ top_n: String(topN) });
+			const requestPath = `${API_PREFIX}/importance?${query.toString()}`;
+			const options = getRequestOptions('GET', requestPath);
+			const req = http.request(options, (res) => {
+				if (res.statusCode !== 200) {
+					buildDaemonError(res, requestPath).then(reject, reject);
+					return;
+				}
+				readResponseBody(res).then((data) => {
+					try {
+						resolve(JSON.parse(data || '{}'));
+					} catch (e) {
+						reject(e);
+					}
+				}, reject);
+			});
+			req.on('error', reject);
+			req.end();
+		});
+	}
+
+	static async getBlastRadius(file: string, maxDepth?: number): Promise<BlastRadius> {
+		return new Promise((resolve, reject) => {
+			const query = new URLSearchParams({ file });
+			if (typeof maxDepth === 'number') {
+				query.set('max_depth', String(maxDepth));
+			}
+			const requestPath = `${API_PREFIX}/blast-radius?${query.toString()}`;
+			const options = getRequestOptions('GET', requestPath);
+			const req = http.request(options, (res) => {
+				if (res.statusCode !== 200) {
+					buildDaemonError(res, requestPath).then(reject, reject);
+					return;
+				}
+				readResponseBody(res).then((data) => {
+					try {
+						resolve(JSON.parse(data || '{}'));
+					} catch (e) {
+						reject(e);
+					}
+				}, reject);
+			});
+			req.on('error', reject);
+			req.end();
+		});
+	}
+
+	static async getCausalChain(file: string): Promise<FileCausalContext> {
+		return new Promise((resolve, reject) => {
+			const query = new URLSearchParams({ file });
+			const requestPath = `${API_PREFIX}/observer/call-graph?${query.toString()}`;
+			const options = getRequestOptions('GET', requestPath);
+			const req = http.request(options, (res) => {
+				if (res.statusCode !== 200) {
+					buildDaemonError(res, requestPath).then(reject, reject);
+					return;
+				}
+				readResponseBody(res).then((data) => {
+					try {
+						resolve(JSON.parse(data || '{}'));
 					} catch (e) {
 						reject(e);
 					}
@@ -1220,6 +1367,52 @@ export class MemoryClient {
 				}, reject);
 			});
 			req.on('error', reject);
+			req.end();
+		});
+	}
+
+	static async getTokenStats(): Promise<TokenStatsResponse> {
+		return new Promise((resolve, reject) => {
+			const requestPath = `${API_PREFIX}/tokens/stats`;
+			const req = http.request(getRequestOptions('GET', requestPath), (res) => {
+				readResponseBody(res).then((data) => {
+					if ((res.statusCode ?? 500) >= 400) {
+						buildDaemonError(res, requestPath).then(reject, reject);
+						return;
+					}
+					try {
+						resolve(JSON.parse(data || '{}'));
+					} catch (e) {
+						reject(e);
+					}
+				}, reject);
+			});
+			req.on('error', reject);
+			req.end();
+		});
+	}
+
+	static async recordAiTokenUse(tokens: number, taskType?: string): Promise<void> {
+		return new Promise((resolve, reject) => {
+			const payload = JSON.stringify({ tokens, task_type: taskType });
+			const requestPath = `${API_PREFIX}/tokens/record`;
+			const options: http.RequestOptions = {
+				...getRequestOptions('POST', requestPath),
+				headers: {
+					'Content-Type': 'application/json',
+					'Content-Length': Buffer.byteLength(payload)
+				}
+			};
+			const req = http.request(options, (res) => {
+				if (res.statusCode !== 200) {
+					console.warn(`Failed to record AI token use: ${res.statusCode}`);
+					resolve(); // don't block
+					return;
+				}
+				resolve();
+			});
+			req.on('error', reject);
+			req.write(payload);
 			req.end();
 		});
 	}

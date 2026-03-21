@@ -2,132 +2,143 @@
 
 ## Requirements
 
-- **A Redis instance is required** — Memix stores your project brain in Redis.
-- VS Code `1.107+` (or compatible forks).
-- For the published daemon binaries, macOS `12+`, modern Linux x64, and Windows x64 are currently targeted.
+- **A Redis instance is required** — Memix stores your project brain in Redis. Any Redis-compatible provider works: local Redis, Upstash, Redis Cloud, or AWS ElastiCache. Free tiers on Upstash work well for individual developers.
+- VS Code `1.107+` or a compatible fork (Cursor, Windsurf, Antigravity, Claude Code).
+- Platform support: macOS 12+, modern Linux x64, Windows x64.
 
-**No plugins or AI-side configuration required** — it works through the IDE's native rules/instructions mechanism.
+No plugins or AI-side configuration required — Memix works through each IDE's native rules and instructions mechanism.
 
 ## Install
 
 1. Install **Memix** from the VS Code Marketplace.
-2. Open a workspace folder (Memix is workspace-scoped).
+2. Open a workspace folder. Memix is workspace-scoped — one brain per project root.
 
-On first activation, the extension ensures the correct daemon binary is available for your platform. The daemon binary is downloaded into VS Code global storage, verified by checksum, and then launched locally.
+On first activation, the extension fetches the daemon manifest from the Memix release channel, downloads the correct platform binary into VS Code global storage, verifies its SHA-256 checksum, and launches it. The daemon is updated automatically in the background when new versions are published — you will see a "Reload Window" prompt when an update is staged and ready.
 
-## First-time setup
+## First-Time Setup
 
-### 1) Connect to Redis
+### 1 — Connect to Redis
 
-Run from the Command Palette:
+From the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`):
 
-- `Memix: Connect Redis`
+```
+Memix: Connect Redis
+```
 
-You’ll be prompted for a Redis connection URL (for example `redis://localhost:6379`). The URL is stored securely using VS Code Secret Storage (OS keychain), not in plaintext settings.
+Enter your Redis connection URL (e.g. `redis://localhost:6379` or `rediss://default:password@host:port`). The URL is stored securely in your operating system's native keychain via VS Code Secret Storage — it is never written to disk in plaintext.
 
-### 2) Initialize the brain
+### 2 — Initialize the Brain
 
-Run:
+```
+Memix: Initialize Brain
+```
 
-- `Memix: Initialize Brain`
+This generates the AI rules files for your IDE (the correct format for Cursor, Windsurf, Claude Code, Antigravity, or VS Code Copilot is auto-detected), creates the initial brain keys in Redis (identity, session state, patterns, tasks, decisions, file map, known issues), and writes the `AGENTS.md` file to your workspace root for tools that follow that convention.
 
-This will:
+### 3 — Open the Brain Monitor
 
-- Choose or generate a project identifier for the workspace.
-- Generate AI rules files for the IDE you’re running (Cursor/Windsurf/Claude Code/Antigravity/VS Code compatible).
-- Create the initial brain keys in Redis (identity, session state, patterns, tasks, etc.).
+```
+Memix: Open Debug Panel
+```
 
-### 3) Open the Brain Monitor
+Or click the Memix status bar item. The panel shows live brain state, observer data, session timeline, skeleton index stats, token intelligence metrics, and the compiled context for the currently active file.
 
-Open the sidebar:
+## What Happens at Startup
 
-- `Memix: Open Debug Panel`
+Once the daemon is running and connected to Redis, several things happen automatically without any user action.
 
-Or click the Memix status bar item.
+The **file watcher** starts observing your workspace immediately. Every file save triggers the three-layer analysis pipeline: tree-sitter AST parsing (all 13 supported languages), OXC semantic enrichment for TypeScript and JavaScript (import resolution, resolved call graph), and embedding computation using the bundled AllMiniLM-L6-v2 model.
 
-## How it works (high level)
+The **background indexer** starts 5 seconds after daemon launch and walks the entire workspace at a throttled pace (10 files per second by default). This is the one-time cost of building the full Code Skeleton Index — similar to TypeScript's language server indexing process. On subsequent daemon restarts, the index is loaded from the persisted binary file at `.memix/skeleton_embeddings.bin` in milliseconds.
 
-- Memix runs a **local Rust daemon** and communicates with it over:
-	- a local **Unix socket** (`~/.memix/daemon.sock`)
-	- and (optionally) **localhost TCP** (`http://127.0.0.1:3456` by default)
-- The daemon provides APIs used by the extension:
+The **token tracker** begins recording session statistics: context compilations, tokens compiled by Memix, tokens sent to AI, and the estimated savings from structural compression versus a naive paste approach.
 
-  - Brain read/write/search (Redis-backed)
-  - Rules file generation
-  - Token counting utilities
+## How It Works (Architecture Summary)
 
-- Memix generates **rules/instructions** files for your AI IDE so the assistant can query high-signal context from Memix (and keep prompts small).
+Memix runs as a local Rust daemon and communicates with the extension over a Unix domain socket (`~/.memix/daemon.sock` on macOS and Linux) or TCP on port 3456 (Windows and developer mode).
 
-## Development: Run the daemon separately (fast Rust iteration)
+The daemon maintains several continuously updated indexes:
 
-When developing the extension (F5), you can keep the daemon running as a standalone process so the extension does **not** spawn/stop it on every reload.
+- **Project brain** — structured JSON entries in Redis covering identity, current task, patterns, decisions, known issues, and session history.
+- **Dependency graph** — a live directed graph mapping file-level import relationships, updated on every save.
+- **Call graph** — a resolved function-to-function call index, enriched with exact file paths and line numbers for TypeScript/JavaScript via OXC.
+- **Code Skeleton Index** — one FSI entry per file and FuSI entries per function for hot files, stored in a separate Redis hash and persisted to a local binary file with embeddings.
+- **Code DNA** — an aggregate architectural summary derived from AST patterns across the entire project.
 
-If you build the Rust daemon from source, make sure these prerequisites are installed first:
+The **Context Compiler** consumes all of the above through a seven-pass optimization pipeline to produce a compact, high-signal context packet for any given active file and task type. The output is what gets injected into AI prompts — not raw file dumps, but a precisely budget-fitted selection of the most relevant structural information.
 
-- Rust toolchain
-- `protoc` / Protocol Buffers compiler
-- Redis
+The **JSON mirror** at `.memix/brain/*.json` gives AI agents direct file-read access to brain entries without requiring Redis access. The daemon writes every brain change to this mirror atomically. AI agents using the pending.json writeback protocol should always read from these files before writing, to avoid overwriting fields they didn't intend to change.
 
-Examples:
+## Brain Data Structure
 
-- macOS: `brew install protobuf`
-- Ubuntu/Debian: `sudo apt-get install protobuf-compiler`
-- Windows: install `protoc` before running the daemon build locally
+The following brain keys are created during initialization and updated as you work:
 
-### Option A: VS Code setting
+- `identity.json` — project name, purpose, tech stack, architecture overview
+- `session_state.json` — current task, progress, blockers, next steps, modified files
+- `patterns.json` — code style conventions, naming preferences, architectural rules
+- `decisions.json` — append-only log of architectural decisions and rationale
+- `file_map.json` — key files and their purposes
+- `known_issues.json` — tracked bugs, tech debt, and warnings
+- `tasks.json` — persistent task lists with status history
+- `session_log.json` — per-session summaries appended at session end
 
-Set:
+These files live at `.memix/brain/` in your workspace root. They are gitignored by the rules generator.
 
-`memix.dev.externalDaemon: true`
+## Debug Panel Sections
 
-Optional (if you want TCP instead of socket):
+The Brain Monitor panel has two tabs: Brain and Advanced.
 
-`memix.dev.daemonHttpUrl: "http://127.0.0.1:3456"`
+The **Brain** tab shows health status, brain size in KB, Redis memory usage, key count, session number, last updated timestamp, current task, and any warnings or recommendations.
 
-### Option B: .env / environment variables (dev-only)
+The **Advanced** tab includes:
 
-In development mode, Memix will try to load a `.env` file from:
+- **Brain Key Coverage** — a checklist of all brain keys with sizes and readiness status. Required keys are separated from recommended and generated ones.
+- **Prompt Pack** — a curated context bundle ready to paste into any AI chat. Includes an approximate token estimate and a copy button. This is especially useful in chat-only AI tools that don't automatically read Memix state.
+- **Compiled Context** — the context compiler's output for the active file, showing which sections were selected, how many tokens each occupies, and how much budget was used.
+- **Token Intelligence** — session and lifetime token metrics: context compilations, tokens compiled by Memix, tokens sent to AI, per-call breakdown (last, max, min, average), estimated tokens saved, and embedding cache efficiency.
+- **Observer DNA** — the Code DNA summary including architecture style, complexity distribution, hot/stable zones, circular dependency risks, and language breakdown.
+- **Daemon Agents** — the currently loaded `AGENTS.md` configuration and recent background agent reports.
+- **Proactive Risk** — file risk scoring for the active file using dependency analysis, known issues, Code DNA stability, and git churn data.
+- **Daemon Timeline** — the flight recorder's session event stream with intent detection and AST mutation history.
+- **Git Archaeology** — hot/stable file classification and recent contributor data from git history.
+- **Predictive Intent** — the current intent classification (scaffolding, bug fixing, refactoring, etc.) with confidence score and rationale.
+- **Learning Layer** — prompt optimization suggestions, model performance summaries, and the cross-project developer profile.
+- **Hierarchy Resolution** — the resolved context inheritance stack for monorepo setups.
 
-- the extension folder (`extension/.env`)
-- or the workspace root (`<your-workspace>/.env`)
+## Development: Run the Daemon Separately
 
-Supported env vars:
+When developing the extension with F5, keep the daemon running as a standalone process to avoid the extension spawning a competing instance.
 
-- `MEMIX_DEV_EXTERNAL_DAEMON=true`
-- `MEMIX_DAEMON_HTTP_URL=http://127.0.0.1:3456`
-- `MEMIX_PORT=3456`
+Download the embedding model first, then build:
 
-Then run the daemon in a separate terminal (from `daemon/`):
+```bash
+cd daemon
+bash scripts/download_model.sh
+cargo run
+```
 
-- `cargo run`
+Tell the extension not to spawn its own daemon:
 
-## Brain data (what gets stored)
+```bash
+# Option A: VS Code setting
+# memix.dev.externalDaemon: true
 
-Memix stores structured brain keys such as:
+# Option B: environment variable or .env file
+MEMIX_DEV_EXTERNAL_DAEMON=true
+```
 
-- `identity`
-- `session:state`
-- `patterns`
-- `tasks`
-- `session:log`
-- `decisions`
-- `file_map`
-- `known_issues`
+See the Daemon Development Guide (`DAEMON_DEVELOPMENT.md`) for the full environment variable reference and troubleshooting steps.
 
-## Brain Monitor (sidebar) actions
+## Writeback Protocol for AI Agents
 
-In the **Brain Monitor** panel, the Actions dropdown provides:
+AI agents proposing brain updates should follow this protocol precisely to avoid data loss:
 
-- **Refresh**: Re-reads brain data, recomputes size, and updates the UI.
-- **Health Check**: Runs consistency checks (required keys, invalid shapes, staleness, and oversized entries).
-- **Detect Conflicts**: Requests conflict detection (may report none depending on build).
-- **Initialize Brain**: Runs first-time brain initialization for the workspace.
-- **Export Brain**: Writes a JSON backup export into your workspace.
-- **Import Brain…**: Imports a previously exported JSON backup.
-- **Team Sync…**: Team sync setup (availability depends on build).
-- **Prune Stale Data**: Trims oversized / stale session log data to keep the brain fast.
-- **Recover Corruption**: Restores missing/invalid required brain keys to safe defaults.
-- **Clear Brain**: Permanently deletes the current project brain in Redis (destructive).
+1. Read the current `.memix/brain/<key>.json` file before writing.
+2. Merge changes into the complete existing object — never write a partial object that omits existing fields.
+3. Write the merged result to `.memix/brain/pending.json` with the correct schema (top-level `project_id`, `upserts` array, `deletes` array, with each upsert entry also carrying `project_id`).
+4. Wait for `.memix/brain/pending.ack.json` to confirm the daemon processed the update.
+
+Writing a partial update silently destroys fields that existed before. The daemon does not merge — it replaces the entry with whatever the upsert contains.
 
 ---
 
@@ -184,27 +195,6 @@ Opens the **Brain Monitor** sidebar panel. This gives you a real-time dashboard 
 - **Last Updated** — Relative time since the brain was last modified (e.g., "3 minutes ago")
 - **Current Task** — What the AI last recorded as the active task
 - **Warnings & Recommendations** — Actionable alerts about missing data, capacity limits, or corruption
-
-### Advanced tab
-
-The **Advanced** tab includes:
-
-- **Brain Key Coverage** — A checklist/table of brain keys, their sizes, taxonomy, and readiness state.
-	- Required keys are clearly separated from recommended/generated/system keys.
-	- If required baseline keys are missing, use **Restore baseline keys**.
-	- Generated keys may appear as “Generated later” rather than hard failures.
-- **Prompt Pack** — A ready-to-paste context bundle generated from high-signal brain keys (identity, session state, patterns, decisions, known issues, tasks, file map).
-	- Includes an approximate token estimate.
-	- Use **View** to open the full payload in a modal.
-	- Click **Copy** to copy the Prompt Pack to your clipboard.
-- **Observer DNA OTel Export** — OpenTelemetry-formatted observer export.
-	- Use **View export** to inspect the full payload in a modal.
-	- Use **Copy JSON** to copy it directly.
-- **Daemon Agents** — Shows the currently loaded `AGENTS.md` configuration and recent agent reports.
-- **Compiled Context** — Shows the daemon’s context-compiler output for the active file and inferred task type.
-- **Proactive Risk** — Shows file risk scoring for the active file using dependency and known-issue signals.
-- **Learning Layer** — Shows prompt optimization suggestions, model-performance summaries, and the cross-project developer profile.
-- **Hierarchy Resolution** — Shows the resolved value and layers used when loading hierarchical brain context.
 
 ### Using Prompt Pack with AI chat
 
