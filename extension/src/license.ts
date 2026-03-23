@@ -28,7 +28,7 @@ export class LicenseManager {
 			const status = await MemoryClient.getLicenseStatus(await this.getDeviceId());
 			this.statusBarItem.text = this.getStatusBarText(status);
 		} catch {
-			this.statusBarItem.text = 'Memix Solo';
+			this.statusBarItem.text = 'Memix';
 		}
 	}
 
@@ -145,7 +145,7 @@ export class LicenseManager {
 		if (status.active && status.tier === 'pro') {
 			return 'Memix Pro';
 		}
-		return 'Memix Solo';
+		return 'Memix';
 	}
 
 	private async pollForLicense(token: string): Promise<string | null> {

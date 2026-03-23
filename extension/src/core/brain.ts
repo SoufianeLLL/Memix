@@ -82,7 +82,6 @@ export class BrainManager {
                 sizeBytes: newValueSize
             });
 
-            await this.updateMeta();
             return { success: true, errors: [] };
         } catch (err: any) {
             console.error(`BrainManager set error: ${err.message}`);
@@ -138,47 +137,132 @@ export class BrainManager {
     }
 
     // --- INIT ---
-    async init(projectId?: string): Promise<void> {
+    // Returns which keys were written and which already existed.
+    // Does ONE read to determine state, then writes all missing keys
+    // in parallel, then updates meta ONCE at the end.
+    async init(projectId?: string): Promise<{ written: string[]; skipped: string[] }> {
         if (projectId) {
             this.projectId = projectId;
         }
 
-        const hasIdentity = await this.get(BRAIN_KEYS.IDENTITY);
-        if (!hasIdentity || hasIdentity === 'null') {
-            await this.set(BRAIN_KEYS.IDENTITY, {
-                name: this.projectId,
-                purpose: 'Memix brain for project ' + this.projectId,
-                tech_stack: [],
-                core_objectives: [],
-                boundaries: []
-            });
+        // Single read — determines exactly what exists and what is missing.
+        // All subsequent decisions are made from this snapshot with zero extra reads.
+        const existing = await this.getAll();
+
+        const isAbsent = (key: string): boolean => {
+            const v = existing[key];
+            return v === null || v === undefined || v === 'null' ||
+                (typeof v === 'string' && v.trim() === '') ||
+                (typeof v === 'string' && v.trim() === 'null');
+        };
+
+        const now = new Date().toISOString();
+
+        // All brain keys with their default values.
+        // Add new required keys here — init handles them automatically.
+        const defaults: Array<{ key: string; value: any; kind: MemoryKind }> = [
+            {
+                key: BRAIN_KEYS.IDENTITY,
+                kind: MemoryKind.Context,
+                value: {
+                    name: this.projectId,
+                    purpose: 'Memix brain for project ' + this.projectId,
+                    tech_stack: [],
+                    core_objectives: [],
+                    boundaries: []
+                }
+            },
+            {
+                key: BRAIN_KEYS.SESSION_STATE,
+                kind: MemoryKind.Context,
+                value: {
+                    current_task: 'Initialized Memix',
+                    last_updated: now,
+                    session_number: 1
+                }
+            },
+            {
+                key: BRAIN_KEYS.PATTERNS,
+                kind: MemoryKind.Context,
+                value: {
+                    files_frequently_edited_together: [],
+                    architectural_rules: [],
+                    user_preferences: {}
+                }
+            },
+            {
+                key: BRAIN_KEYS.TASKS,
+                kind: MemoryKind.Context,
+                value: { current_list: null, lists: [] }
+            },
+            {
+                key: BRAIN_KEYS.DECISIONS,
+                kind: MemoryKind.Decision,
+                value: []
+            },
+            {
+                key: BRAIN_KEYS.FILE_MAP,
+                kind: MemoryKind.Context,
+                value: {}
+            },
+            {
+                key: BRAIN_KEYS.KNOWN_ISSUES,
+                kind: MemoryKind.Context,
+                value: []
+            },
+            {
+                key: BRAIN_KEYS.SESSION_LOG,
+                kind: MemoryKind.Context,
+                value: []
+            },
+        ];
+
+        const toWrite = defaults.filter(d => isAbsent(d.key));
+        const skipped = defaults.filter(d => !isAbsent(d.key)).map(d => d.key);
+
+        if (toWrite.length === 0) {
+            return { written: [], skipped };
         }
 
-        const hasSession = await this.get(BRAIN_KEYS.SESSION_STATE);
-        if (!hasSession || hasSession === 'null') {
-            await this.set(BRAIN_KEYS.SESSION_STATE, {
-                current_task: 'Initialized Memix',
-                last_updated: new Date().toISOString(),
-                session_number: 1
-            });
+        // Build entries directly — bypass set() to avoid per-write updateMeta() calls.
+        // Validation is intentionally skipped for init defaults because they are
+        // structurally correct by construction.
+        const entries: MemoryEntry[] = toWrite.map(({ key, value, kind }) => ({
+            id: key,
+            project_id: this.projectId,
+            kind,
+            content: JSON.stringify(value),
+            tags: [key.split(':')[0]],
+            source: MemorySource.UserManual,
+            superseded_by: null,
+            contradicts: [],
+            created_at: now,
+            updated_at: now,
+            access_count: 0,
+            last_accessed_at: null
+        }));
+
+        // Write all missing entries in parallel — N HTTP calls to the daemon,
+        // which are all fast Unix socket operations. No sequential bottleneck.
+        const results = await Promise.allSettled(
+            entries.map(entry => MemoryClient.upsertMemory(this.projectId, entry))
+        );
+
+        const failures = results
+            .map((r, i) => ({ r, key: toWrite[i].key }))
+            .filter(({ r }) => r.status === 'rejected');
+
+        if (failures.length > 0) {
+            const detail = failures
+                .map(({ r, key }) => `${key}: ${(r as PromiseRejectedResult).reason?.message ?? 'unknown'}`)
+                .join(', ');
+            throw new Error(`Brain init: ${failures.length} key(s) failed to write — ${detail}`);
         }
 
-        const hasPatterns = await this.get(BRAIN_KEYS.PATTERNS);
-        if (!hasPatterns || hasPatterns === 'null') {
-            await this.set(BRAIN_KEYS.PATTERNS, {
-                files_frequently_edited_together: [],
-                architectural_rules: [],
-                user_preferences: {}
-            });
-        }
+        // Meta written once — after all entries are confirmed written.
+        await this.updateMeta();
 
-        const hasTasks = await this.get(BRAIN_KEYS.TASKS);
-        if (!hasTasks || hasTasks === 'null') {
-            await this.set(BRAIN_KEYS.TASKS, {
-                current_list: null,
-                lists: []
-            });
-        }
+        return { written: toWrite.map(d => d.key), skipped };
     }
 
     // --- META ---
@@ -191,7 +275,7 @@ export class BrainManager {
             createdAt: existingMeta?.createdAt || new Date().toISOString(),
             lastAccessed: new Date().toISOString(),
             totalSessions: existingMeta?.totalSessions || 0,
-            brainVersion: '1.0.9-beta',
+            brainVersion: '1.0.10-beta',
             sizeBytes: sizeInfo.totalBytes
         };
 

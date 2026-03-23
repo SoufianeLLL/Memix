@@ -29,7 +29,7 @@ function setDaemonReadinessState(state: DaemonReadinessState) {
 		return;
 	}
 	if (state.kind === 'ready') {
-		statusBarItem.text = 'Memix Solo';
+		statusBarItem.text = 'Memix';
 		return;
 	}
 	if (state.kind === 'error' || state.kind === 'missing') {
@@ -239,9 +239,9 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(async (e) => {
 		if (!projectId || !workspaceRoot || !e.document.uri.fsPath.startsWith(workspaceRoot)) return;
 		if (e.document.uri.scheme !== 'file') return;
-		
+
 		const filePath = e.document.uri.fsPath;
-		
+
 		// If we already showed a warning for this file recently, skip to prevent spam
 		if (shownBlastRadiusInfos.has(filePath)) return;
 
@@ -249,13 +249,13 @@ export async function activate(context: vscode.ExtensionContext) {
 		blastRadiusTimeout = setTimeout(async () => {
 			try {
 				const data = await MemoryClient.getBlastRadius(filePath, 5);
-				
+
 				// Show a warning if it affects more than 5 nodes
 				if (data.affected_count && data.affected_count >= 5) {
 					shownBlastRadiusInfos.add(filePath);
 					// auto-clear the warning skip after 5 minutes so it can warn again later if needed
 					setTimeout(() => shownBlastRadiusInfos.delete(filePath), 5 * 60 * 1000);
-					
+
 					blastRadiusStatusBar.text = `$(warning) Effects: ${data.affected_count} files`;
 					blastRadiusStatusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
 					blastRadiusStatusBar.show();
@@ -351,6 +351,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				{ label: '$(trash) Prune Stale Data', description: 'Clear excessive logs' },
 				{ label: '$(wrench) Recover Corruption', description: 'Fix broken structures' },
 				{ label: '', kind: vscode.QuickPickItemKind.Separator },
+				{ label: '$(database) Change Redis Connection...', description: 'Update external brain storage URL' },
 				{ label: '$(trashcan) Clear Brain', description: 'Delete all states' }
 			);
 			const picked = await vscode.window.showQuickPick(options, { placeHolder: 'Memix Brain Actions' });
@@ -368,6 +369,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				'$(organization) Team Sync...': 'memix.teamSync',
 				'$(trash) Prune Stale Data': 'memix.prune',
 				'$(wrench) Recover Corruption': 'memix.recoverBrain',
+				'$(database) Change Redis Connection...': 'memix.connect',
 				'$(trashcan) Clear Brain': 'memix.clearBrain'
 			};
 			const cmd = cmds[picked.label];
@@ -502,7 +504,6 @@ export async function activate(context: vscode.ExtensionContext) {
 			if (!(await ensureDaemonReady())) { return; }
 			if (!requireWorkspace() || !workspaceRoot) { return; }
 			panelProvider?.getWebView()?.postMessage({ command: 'showLoading', text: 'Initializing brain...' });
-			await new Promise(resolve => setTimeout(resolve, 600));
 			try {
 				const redisUrl = await secretManager.getSecret('redisUrl');
 				if (!redisUrl) {
@@ -527,26 +528,38 @@ export async function activate(context: vscode.ExtensionContext) {
 				const ide = detectIDE();
 				await MemoryClient.generateRules(projectId, redisUrl, ide, workspaceRoot);
 
-				// Check if brain already exists
-				const exists = await brain.exists();
-				if (exists) {
+				// init() does one read to determine state, writes only missing keys
+				// in parallel, and returns exactly what changed. No separate exists()
+				// call needed — that would be a redundant full Redis read.
+				const initResult = await brain.init(projectId);
+
+				if (initResult.written.length === 0) {
+					// All keys already existed — ask before overwriting
 					const overwrite = await vscode.window.showWarningMessage(
-						'Brain already exists for this project. Overwrite?',
-						'Yes', 'No'
+						`Brain already fully initialized for ${projectId}. Re-initialize missing or all keys?`,
+						'Re-init missing', 'Overwrite all', 'Cancel'
 					);
-					if (overwrite !== 'Yes') {
-						panelProvider?.sendUpdate();
+					if (!overwrite || overwrite === 'Cancel') {
+						panelProvider?.sendUpdate({ includeAdvanced: false });
 						return;
+					}
+					if (overwrite === 'Overwrite all') {
+						await brain.clearAll();
+						await brain.init(projectId);
 					}
 				}
 
-				// Actually initialize the Redis database keys via HTTP daemon
-				await brain.init(projectId);
-
 				vscode.window.showInformationMessage(
-					`Memix: Initialized! Project ID: ${projectId}. Rules generated for ${ide}.`
+					`Memix: Initialized! Project: ${projectId} · IDE: ${ide} · Written: ${initResult.written.length > 0
+						? initResult.written.join(', ')
+						: 'nothing new (already complete)'
+					}`
 				);
-				panelProvider?.sendUpdate();
+
+				// All writes are confirmed before init() resolves.
+				// The daemon's entry cache was cleared by each upsert, so
+				// sendUpdate() will read fresh data from Redis with no artificial wait.
+				await panelProvider?.sendUpdate({ includeAdvanced: false });
 			} catch (err: any) {
 				vscode.window.showErrorMessage(`Memix init failed: ${err.message}`);
 				panelProvider?.sendUpdate();
