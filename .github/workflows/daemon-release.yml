@@ -285,11 +285,14 @@ jobs:
           echo "Searching for binaries:"
           find . -name "memix-daemon-*" -type f
           
+      - name: Set Release Version
+        run: echo "VERSION_NUMBER=${GITHUB_REF_NAME#daemon-v}" >> $GITHUB_ENV
+
       - name: Upload binaries to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "Daemon v${GITHUB_REF_NAME#daemon-v}"
+          name: "Daemon v${{ env.VERSION_NUMBER }}"
           files: |
             release-assets/memix-daemon-*
             manifest.json

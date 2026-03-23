@@ -49,11 +49,11 @@ const nextExporterTs = exporterTs.replace(
 const daemonBadgeVersion = versions.daemonVersion.replace(/-/g, '--');
 const extensionBadgeVersion = versions.extensionVersion.replace(/-/g, '--');
 const nextReadme = readme.replace(
-	/badge\/daemon-v.*?-green\?style=flat/g,
-	`badge/daemon-v${daemonBadgeVersion}-green?style=flat`
+	/badge\/daemon-v.*?-emerald\?style=for-the-badge/g,
+	`badge/daemon-v${daemonBadgeVersion}-emerald?style=for-the-badge`
 ).replace(
-	/badge\/extension-v.*?-orange\?style=flat/g,
-	`badge/extension-v${extensionBadgeVersion}-orange?style=flat`
+	/badge\/extension-v.*?-orange\?style=for-the-badge/g,
+	`badge/extension-v${extensionBadgeVersion}-orange?style=for-the-badge`
 );
 
 if (cargoToml === nextCargoToml) {

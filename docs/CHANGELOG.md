@@ -8,6 +8,18 @@ Here's the markdown to add at the top of your changelog entries, above whatever 
 
 ---
 
+## [1.0.11-beta] (Daemon: 0.3.2-beta) — 2026-03-23
+### Added
+- **Brain Sleep Check:** Added handling during `initBrain()` to detect if the daemon is currently paused; if so, it temporarily resumes processing, performs initialization, and restores the paused state.
+- **Client Control APIs:** Implemented `/control/status`, `/control/resume`, and `/control/pause` API wrappers natively in the `MemoryClient`.
+
+### Fixed
+- **Daemon Boot Latency:** Removed hardcoded sleep allocations (`sleep(5s)`) across startup workers (`run_project_migrations`, `load_lifetime_into`, etc.). They now listen accurately via a `Notify` sync token guaranteeing background indexing begins the instant the unix socket is bound.
+- **Embedding Cache Mutex:** Exchanged `std::sync::Mutex` for `parking_lot::Mutex` in FastEmbed initialization to prevent thread panics and handle text chunks safely across asynchronous Redis workers.
+- **CI Interpolation Bug:** Fixed a YAML deployment issue where GitHub Action string expansion passed the literal Bash variable parsing string `"Daemon v${GITHUB_REF_NAME#daemon-v}"` to release tags. Release workflow now executes extraction via CLI first.
+
+---
+
 ## [1.0.10-beta] (Daemon: 0.3.1-beta) — 2026-03-23
 ### Added
 - **Change Redis Connection:** Added a new quick-pick option in the Memix Settings menu to easily swap the active Redis connection without clearing the brain.
