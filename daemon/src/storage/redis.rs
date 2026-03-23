@@ -30,7 +30,7 @@ pub struct RedisStorage {
 	/// In-memory cache for get_entries results. Avoids redundant Redis full-hash
     /// reads when the panel refreshes rapidly — entries are valid for 20 seconds.
     /// Invalidated immediately when any upsert or delete touches the same project.
-	entry_cache: tokio::sync::RwLock<std::collections::HashMap
+	entry_cache: tokio::sync::RwLock<std::collections::HashMap<
         String,
         (std::time::Instant, Vec<crate::brain::schema::MemoryEntry>),
     >>,
@@ -472,6 +472,38 @@ impl RedisStorage {
 		let fusi = entries.iter().filter(|e| e.tags.contains(&"fusi".to_string())).count();
 		Ok((fsi, fusi, entries.len()))
 	}
+
+	/// Performs the actual Redis HVALS read for a project. Called only on cache miss.
+	/// Separated from get_entries so the cache wrapper stays clean and readable.
+	async fn fetch_entries_from_redis(&self, project_id: &str) -> Result<Vec<MemoryEntry>> {
+		match self.get_conn().await {
+			Ok(mut conn) => {
+				match conn.hvals::<&str, Vec<String>>(project_id).await {
+					Ok(values) => {
+						tracing::debug!("Got {} values from Redis", values.len());
+						let mut entries = Vec::new();
+						for val in values {
+							if let Ok(entry) = serde_json::from_str::<MemoryEntry>(&val) {
+								entries.push(entry);
+							}
+						}
+						Ok(entries)
+					}
+					Err(e) => {
+						tracing::error!("❌ Redis HVALS failed: {}", e);
+						Err(anyhow::anyhow!("Redis command failed: {}", e))
+					}
+				}
+			}
+			Err(e) => {
+				tracing::error!("❌ Failed to get Redis connection: {}", e);
+				if e.to_string().contains("refused") {
+					tracing::error!("🔴 REDIS CONNECTION REFUSED — verify MEMIX_REDIS_URL and host reachability");
+				}
+				Err(anyhow::anyhow!("Redis connection failed: {}", e))
+			}
+		}
+	}
 }
 
 #[async_trait]
@@ -509,38 +541,6 @@ impl StorageBackend for RedisStorage {
 		}
 
 		Ok(entries)
-	}
-
-	/// Performs the actual Redis HVALS read for a project. Called only on cache miss.
-	/// Separated from get_entries so the cache wrapper stays clean and readable.
-	async fn fetch_entries_from_redis(&self, project_id: &str) -> Result<Vec<MemoryEntry>> {
-		match self.get_conn().await {
-			Ok(mut conn) => {
-				match conn.hvals::<&str, Vec<String>>(project_id).await {
-					Ok(values) => {
-						tracing::debug!("Got {} values from Redis", values.len());
-						let mut entries = Vec::new();
-						for val in values {
-							if let Ok(entry) = serde_json::from_str::<MemoryEntry>(&val) {
-								entries.push(entry);
-							}
-						}
-						Ok(entries)
-					}
-					Err(e) => {
-						tracing::error!("❌ Redis HVALS failed: {}", e);
-						Err(anyhow::anyhow!("Redis command failed: {}", e))
-					}
-				}
-			}
-			Err(e) => {
-				tracing::error!("❌ Failed to get Redis connection: {}", e);
-				if e.to_string().contains("refused") {
-					tracing::error!("🔴 REDIS CONNECTION REFUSED — verify MEMIX_REDIS_URL and host reachability");
-				}
-				Err(anyhow::anyhow!("Redis connection failed: {}", e))
-			}
-		}
 	}
 
 	async fn export_project_to_json(&self, project_id: &str) -> Result<u64> {
