@@ -1349,6 +1349,69 @@ export class MemoryClient {
 		});
 	}
 
+	static async controlStatus(): Promise<any> {
+		return new Promise((resolve, reject) => {
+			const requestPath = `${API_PREFIX}/control/status`;
+			const req = http.request(getRequestOptions('GET', requestPath), (res) => {
+				readResponseBody(res).then((data) => {
+					if ((res.statusCode ?? 500) >= 400) {
+						buildDaemonError(res, requestPath).then(reject, reject);
+						return;
+					}
+					try {
+						resolve(JSON.parse(data || '{}'));
+					} catch (e) {
+						reject(e);
+					}
+				}, reject);
+			});
+			req.on('error', reject);
+			req.end();
+		});
+	}
+
+	static async controlResume(): Promise<void> {
+		return new Promise((resolve, reject) => {
+			const requestPath = `${API_PREFIX}/control/resume`;
+			const req = http.request(getRequestOptions('POST', requestPath), (res) => {
+				readResponseBody(res).then((data) => {
+					if ((res.statusCode ?? 500) >= 400) {
+						buildDaemonError(res, requestPath).then(reject, reject);
+						return;
+					}
+					try {
+						resolve(JSON.parse(data || '{}'));
+					} catch (e) {
+						reject(e);
+					}
+				}, reject);
+			});
+			req.on('error', reject);
+			req.end();
+		});
+	}
+
+	static async controlPause(): Promise<void> {
+		return new Promise((resolve, reject) => {
+			const requestPath = `${API_PREFIX}/control/pause`;
+			const req = http.request(getRequestOptions('POST', requestPath), (res) => {
+				readResponseBody(res).then((data) => {
+					if ((res.statusCode ?? 500) >= 400) {
+						buildDaemonError(res, requestPath).then(reject, reject);
+						return;
+					}
+					try {
+						resolve(JSON.parse(data || '{}'));
+					} catch (e) {
+						reject(e);
+					}
+				}, reject);
+			});
+			req.on('error', reject);
+			req.end();
+		});
+	}
+
 	static async getLicenseStatus(deviceId?: string): Promise<LicenseStatusResponse> {
 		return new Promise((resolve, reject) => {
 			const suffix = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : '';

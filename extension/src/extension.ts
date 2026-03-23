@@ -528,6 +528,22 @@ export async function activate(context: vscode.ExtensionContext) {
 				const ide = detectIDE();
 				await MemoryClient.generateRules(projectId, redisUrl, ide, workspaceRoot);
 
+				// Check if the brain is paused before attempting writes.
+				// Init is an explicit user action, so we auto-resume rather than
+				// failing with a cryptic 503. If the user had it paused, we offer
+				// to re-pause after init completes.
+				let wasPaused = false;
+				try {
+					const controlStatus = await MemoryClient.controlStatus();
+					wasPaused = controlStatus?.config?.brain_paused === true;
+					if (wasPaused) {
+						await MemoryClient.controlResume();
+					}
+				} catch {
+					// If control status is unreachable, proceed — init() will surface
+					// a clear error if writes still fail due to paused state.
+				}
+
 				// init() does one read to determine state, writes only missing keys
 				// in parallel, and returns exactly what changed. No separate exists()
 				// call needed — that would be a redundant full Redis read.
@@ -555,6 +571,16 @@ export async function activate(context: vscode.ExtensionContext) {
 						: 'nothing new (already complete)'
 					}`
 				);
+
+				if (wasPaused) {
+					const keepActive = await vscode.window.showInformationMessage(
+						'Brain was paused before init. Keep it active?',
+						'Keep active', 'Re-pause'
+					);
+					if (keepActive !== 'Keep active') {
+						await MemoryClient.controlPause();
+					}
+				}
 
 				// All writes are confirmed before init() resolves.
 				// The daemon's entry cache was cleared by each upsert, so
