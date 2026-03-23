@@ -12,14 +12,14 @@ document.addEventListener('click', function(e) {
 });
 
 window.onerror = function(msg, src, ln, col, err) {
-	document.body.innerHTML = '<div style="color:red;padding:20px;font-size:14px;background:transparent;border:1px solid red"><b>FATAL WEBVIEW ERROR:</b><br/>' + msg + '<br/>Line: ' + ln + '</div>';
+	document.body.innerHTML = '<div style="color:red;padding:20px;font-size:14px;background:transparent;border:1px solid red"><b>FATAL WEBVIEW ERROR:</b><br/>' + escapeHtml(msg) + '<br/>Line: ' + escapeHtml(ln) + '</div>';
 };
 
 let vscode;
 try {
 	vscode = acquireVsCodeApi();
 } catch(e) {
-	document.body.innerHTML = '<div style="color:red;padding:20px;"><b>API ERROR:</b> ' + e.message + '</div>';
+	document.body.innerHTML = '<div style="color:red;padding:20px;"><b>API ERROR:</b> ' + escapeHtml(e.message) + '</div>';
 }
 
 let spinnerActive = false;
@@ -540,8 +540,8 @@ window.addEventListener('message', function (e) {
 			listHtml += '<li>...and ' + (data.affected.length - 50) + ' more</li>';
 		}
 
-		var htmlStr = '<div style="margin-bottom: 12px;"><strong>Affected files:</strong> ' + (data.affected_count || 0) + '</div>' + 
-						'<div style="margin-bottom: 12px;"><strong>Max recursion depth:</strong> ' + (data.max_depth || 0) + '</div>' + 
+		var htmlStr = '<div style="margin-bottom: 12px;"><strong>Affected files:</strong> ' + escapeHtml(data.affected_count || 0) + '</div>' + 
+						'<div style="margin-bottom: 12px;"><strong>Max recursion depth:</strong> ' + escapeHtml(data.max_depth || 0) + '</div>' + 
 						'<ul style="margin:0; padding-left: 20px; max-height: 250px; overflow-y: auto; font-family: monospace; font-size: 11px;">' + 
 						listHtml + '</ul>';
 
@@ -712,7 +712,7 @@ window.addEventListener('message', function (e) {
 		for (var name in cats) {
 			var info = cats[name];
 			var kb = (info.size / 1024).toFixed(1);
-			catHtml += '<div class="w-full py-0.5"><div class="stat">' + name + ' <span>' + kb + ' KB</span></div><div class="text-[11px] opacity-50">' + info.keys.join(', ') + '</div></div>';
+			catHtml += '<div class="w-full py-0.5"><div class="stat">' + escapeHtml(name) + ' <span>' + escapeHtml(kb) + ' KB</span></div><div class="text-[11px] opacity-50">' + escapeHtml(info.keys.join(', ')) + '</div></div>';
 		}
 		var categoriesEl = byId('categories');
 		if (categoriesEl) categoriesEl.innerHTML = catHtml || '<span style="color:var(--vscode-descriptionForeground)">No data</span>';
@@ -822,9 +822,9 @@ window.addEventListener('message', function (e) {
 				var missingLine = missingSections.length > 0
 					? '<div style="margin-top:4px">Missing right now: ' + missingSections.map(escapeHtml).join(', ') + '</div>'
 					: '';
-				pps.innerHTML = '<strong>' + (data.promptPackRequestedSectionCount || 0) + '</strong> sections prepared for the <strong>' + escapeHtml(data.promptPackVariant || 'Standard') + '</strong> variant.' +
-					'<div style="margin-top:4px"><strong>' + (data.promptPackAvailableSectionCount || 0) + '</strong> available from the current brain.</div>' +
-					'<div style="margin-top:4px"><strong>' + observerSectionCount + '</strong> observer intelligence sections included.</div>' +
+				pps.innerHTML = '<strong>' + escapeHtml(data.promptPackRequestedSectionCount || 0) + '</strong> sections prepared for the <strong>' + escapeHtml(data.promptPackVariant || 'Standard') + '</strong> variant.' +
+					'<div style="margin-top:4px"><strong>' + escapeHtml(data.promptPackAvailableSectionCount || 0) + '</strong> available from the current brain.</div>' +
+					'<div style="margin-top:4px"><strong>' + escapeHtml(observerSectionCount) + '</strong> observer intelligence sections included.</div>' +
 					missingLine;
 			}
 			var tok = (typeof data.promptPackTokens === 'number') ? (data.promptPackTokens + ' tokens') : 'Tokens: —';
@@ -857,7 +857,7 @@ window.addEventListener('message', function (e) {
 			for (var pi = 0; pi < prev.length; pi++) {
 				var dt = prev[pi].date || '';
 				var sm = prev[pi].summary || '';
-				pHtml += '<div class="mb-2"><div class="opacity-50">' + dt + '</div><div class="text-sm">' + sm + '</div></div>';
+				pHtml += '<div class="mb-2"><div class="opacity-50">' + escapeHtml(dt) + '</div><div class="text-sm">' + escapeHtml(sm) + '</div></div>';
 			}
 			slPrev.innerHTML = pHtml;
 		}
@@ -1037,7 +1037,7 @@ window.addEventListener('message', function (e) {
 						var count = entry[1];
 						return '<div class="stat">'
 							+ '<span>' + name + '</span>'
-							+ '<span>' + count + ' file' + (count !== 1 ? 's' : '') + '</span>'
+							+ '<span>' + escapeHtml(count) + ' file' + (count !== 1 ? 's' : '') + '</span>'
 							+ '</div>';
 					}).join('')
 					+ '</div>';
@@ -1068,7 +1068,7 @@ window.addEventListener('message', function (e) {
 				? '<div class="w-full"><div class="w-full text-sm">Hot zones:</div><div class="w-full space-y-0.5">' + hotZones.slice(0, 4).map(stripRoot).map(file => '<div>— ' + escapeHtml(file) + '</div>').join('') + '</div></div>'
 				: '<div style="color:var(--vscode-descriptionForeground)">No hot zones detected</div>';
 			if (circular.length > 0) {
-				hotHtml += '<div class="w-full"><div class="w-full text-sm">Circular risks:</div><div class="w-full space-y-0.5">' + circular.slice(0, 3).map(stripRoot).map(file => '<div>— ' + file + '</div>') + '</div></div>';
+				hotHtml += '<div class="w-full"><div class="w-full text-sm">Circular risks:</div><div class="w-full space-y-0.5">' + circular.slice(0, 3).map(stripRoot).map(file => '<div>— ' + escapeHtml(file) + '</div>').join('') + '</div></div>';
 			}
 			dnaHot.innerHTML = hotHtml;
 		}
@@ -1201,9 +1201,9 @@ window.addEventListener('message', function (e) {
 		if (importanceSummary) {
 			if (importance && typeof importance.node_count === 'number') {
 				importanceSummary.innerHTML =
-					'<div class="stat"><span>Nodes</span><span>' + importance.node_count + '</span></div>' +
-					'<div class="stat"><span>Cycles</span><span>' + (importance.cycle_count || 0) + '</span></div>' +
-					'<div class="stat"><span>Topo Order</span><span>' + (importance.topological_order_length || 0) + '</span></div>';
+					'<div class="stat"><span>Nodes</span><span>' + escapeHtml(importance.node_count) + '</span></div>' +
+					'<div class="stat"><span>Cycles</span><span>' + escapeHtml(importance.cycle_count || 0) + '</span></div>' +
+					'<div class="stat"><span>Topo Order</span><span>' + escapeHtml(importance.topological_order_length || 0) + '</span></div>';
 			} else {
 				importanceSummary.textContent = 'No structural graph data';
 			}
@@ -1236,8 +1236,8 @@ window.addEventListener('message', function (e) {
 			if (blast && typeof blast.affected_count === 'number') {
 				blastSummary.innerHTML =
 					'<div>' + escapeHtml(blast.source || data.activeFile || '—') + '</div>' +
-					'<div class="stat"><span>Affected files</span><span>' + blast.affected_count + '</span></div>' +
-					'<div class="stat"><span>Depth</span><span>' + (blast.max_depth || 0) + '</span></div>';
+					'<div class="stat"><span>Affected files</span><span>' + escapeHtml(blast.affected_count) + '</span></div>' +
+					'<div class="stat"><span>Depth</span><span>' + escapeHtml(blast.max_depth || 0) + '</span></div>';
 			} else {
 				blastSummary.textContent = 'No blast radius available';
 			}
@@ -1257,7 +1257,7 @@ window.addEventListener('message', function (e) {
 				if (affectedFiles.length > 0) {
 					blastHtml += '<div class="w-full"><div class="w-full text-sm">Reach:</div><div class="w-full space-y-0.5">' +
 						affectedFiles.slice(0, 5).map(function(entry) {
-							return escapeHtml(entry.path || 'unknown') + ' (depth ' + (entry.depth || 0) + ')';
+							return escapeHtml(entry.path || 'unknown') + ' (depth ' + escapeHtml(entry.depth || 0) + ')';
 						}).join('<br/>') + '</div></div>';
 				}
 				blastDetails.innerHTML = blastHtml;
@@ -1270,9 +1270,9 @@ window.addEventListener('message', function (e) {
 			if (causal && Array.isArray(causal.symbols)) {
 				causalSummary.innerHTML =
 					'<div>' + escapeHtml(causal.file || data.activeFile || '—') + '</div>' +
-					'<div class="stat"><span>Symbols</span><span>' + causal.symbols.length + '</span></div>' +
-					'<div class="stat"><span>Outgoing</span><span>' + (causal.total_outgoing_edges || 0) + '</span></div>' +
-					'<div class="stat"><span>Incoming</span><span>' + (causal.total_incoming_edges || 0) + '</span></div>';
+					'<div class="stat"><span>Symbols</span><span>' + escapeHtml(causal.symbols.length) + '</span></div>' +
+					'<div class="stat"><span>Outgoing</span><span>' + escapeHtml(causal.total_outgoing_edges || 0) + '</span></div>' +
+					'<div class="stat"><span>Incoming</span><span>' + escapeHtml(causal.total_incoming_edges || 0) + '</span></div>';
 			} else {
 				causalSummary.textContent = 'No causal chain available';
 			}
@@ -1291,13 +1291,13 @@ window.addEventListener('message', function (e) {
 							var target = edge.callee_file
 								? escapeHtml(edge.callee_file) + ' :: ' + escapeHtml(edge.callee_symbol || 'unknown')
 								: escapeHtml(edge.callee_symbol || 'unknown');
-							return target + (edge.callee_line ? ' (line ' + edge.callee_line + ')' : '');
+							return target + (edge.callee_line ? ' (line ' + escapeHtml(edge.callee_line) + ')' : '');
 						}).join('<br/>')
 						: 'none';
 					var incomingHtml = incoming.length > 0
 						? incoming.map(function(edge) {
 							return escapeHtml(edge.caller_file || 'unknown') + ' :: ' + escapeHtml(edge.caller_symbol || 'unknown') +
-								(edge.call_line ? ' (line ' + edge.call_line + ')' : '');
+								(edge.call_line ? ' (line ' + escapeHtml(edge.call_line) + ')' : '');
 						}).join('<br/>')
 						: 'none';
 					return '<div style="margin-bottom:10px;font-size:11px;line-height:1.4">' +
@@ -1338,7 +1338,7 @@ window.addEventListener('message', function (e) {
 			if (compiled && typeof compiled.total_tokens === 'number') {
 				compiledSummary.innerHTML = '<div>' + escapeHtml(data.activeFile || 'Active file unavailable') + '</div>' +
 					'<div class="stat mt-1"><span>Task</span>' + '<span class="capitalize">' + escapeHtml((data.inferredTaskType || '').replace(/_/g, ' ') || 'unknown') + '</span></div>' + 
-					'<div class="stat"><span>Tokens/Budget</span>' + '<span>' + compiled.total_tokens + '/' + compiled.budget + '</span></div>' +
+					'<div class="stat"><span>Tokens/Budget</span>' + '<span>' + escapeHtml(compiled.total_tokens) + '/' + escapeHtml(compiled.budget) + '</span></div>' +
 					'<div class="mb-2 mt-1" style="color:var(--vscode-descriptionForeground)">' + escapeHtml(compiled.explainability_summary || '') + '</div>';
 			} else {
 				compiledSummary.textContent = 'No compiled context';
@@ -1349,7 +1349,7 @@ window.addEventListener('message', function (e) {
 			var sections = compiled && Array.isArray(compiled.selected_sections) ? compiled.selected_sections : [];
 			compiledSections.innerHTML = sections.length > 0
 				? '<div><b>Selected sections:</b></div>' + sections.slice(0, 5).map(function(section) {
-					return '<div class="stat"><span class="capitalize">' + section.kind + '</span>' + '<span>' + section.tokens + ' tokens</span></div>';
+					return '<div class="stat"><span class="capitalize">' + escapeHtml(section.kind) + '</span>' + '<span>' + escapeHtml(section.tokens) + ' tokens</span></div>';
 				}).join('')
 				: '<div style="color:var(--vscode-descriptionForeground)">No selected sections</div>';
 		}
@@ -1360,8 +1360,8 @@ window.addEventListener('message', function (e) {
 			if (risk && typeof risk.risk_score === 'number') {
 				var riskPct = Math.round(risk.risk_score * 100);
 				riskSummary.innerHTML = '<div>' + escapeHtml(risk.file) + '</div>' + 
-					'<div class="stat"><span>Risk</span>' + '<span>' + riskPct + '%</span></div>' + 
-					'<div class="stat"><span>Dependents</span>' + '<span>' + (risk.dependents || 0) + '</span></div>' + 
+					'<div class="stat"><span>Risk</span>' + '<span>' + escapeHtml(riskPct) + '%</span></div>' + 
+					'<div class="stat"><span>Dependents</span>' + '<span>' + escapeHtml(risk.dependents || 0) + '</span></div>' + 
 					'<div class="mt-2" style="color:var(--vscode-descriptionForeground)">' + escapeHtml(risk.recommendation || '') + '</div>';
 			} else {
 				riskSummary.textContent = 'No risk signal';
@@ -1388,7 +1388,7 @@ window.addEventListener('message', function (e) {
 		if (promptOptEl) {
 			if (promptOpt && typeof promptOpt.recommended_budget === 'number') {
 				promptOptEl.innerHTML = '<div class="stat"><span>Task</span>' + '<span>' + escapeHtml((promptOpt.task_type || '').replace(/_/g, ' ') || (data.inferredTaskType || '').replace(/_/g, ' ') || 'unknown') + '</span></div>' + 
-					'<div class="stat"><span>Recommended budget</span>' + '<span>' + promptOpt.recommended_budget + ' tokens</span></div>' + 
+					'<div class="stat"><span>Recommended budget</span>' + '<span>' + escapeHtml(promptOpt.recommended_budget) + ' tokens</span></div>' + 
 					'<div class="mt-2" style="color:var(--vscode-descriptionForeground)">' + (promptOpt.always_include || []).map(escapeHtml).join(', ') + '</div>';
 			} else {
 				promptOptEl.textContent = 'No learning data';
@@ -1409,8 +1409,8 @@ window.addEventListener('message', function (e) {
 					'<div class="capitalize text-base font-semibold mb-2">' + escapeHtml(model || 'unknown') + '</div>' +
 					'<ul class="pl-5">' +
 					'<li class="stat"><span>Task</span>' + '<span>' + escapeHtml(taskName || 'unknown') + '</span></li>' +
-					'<li class="stat"><span>First-try rate</span>' + '<span>' + Math.round((tp.first_try_rate || 0) * 100) + '%</span></li>' +
-					'<li class="stat"><span>Runs</span>' + '<span>' + (tp.runs || 0) + '</span></li>' +
+					'<li class="stat"><span>First-try rate</span>' + '<span>' + escapeHtml(Math.round((tp.first_try_rate || 0) * 100)) + '%</span></li>' +
+					'<li class="stat"><span>Runs</span>' + '<span>' + escapeHtml(tp.runs || 0) + '</span></li>' +
 					'<ul>' +
 					'</div>');
 				}
@@ -1456,7 +1456,7 @@ window.addEventListener('message', function (e) {
 				var title = typeof tasks[j] === 'string' ? tasks[j] : (tasks[j].title || tasks[j].task || 'Unknown task');
 				tHtml += '<div class="task-item"><div class="task-bullet">●</div><div>' + escapeHtml(title) + '</div></div>';
 			}
-			if (tasks.length > 10) tHtml += '<div class="text-[11px] mt-2" style="color:var(--vscode-descriptionForeground);">+' + (tasks.length - 5) + ' more tasks...</div>';
+			if (tasks.length > 10) tHtml += '<div class="text-[11px] mt-2" style="color:var(--vscode-descriptionForeground);">+' + escapeHtml(tasks.length - 5) + ' more tasks...</div>';
 			var pendingContainerEl = byId('pending-tasks-container');
 			if (pendingContainerEl) pendingContainerEl.innerHTML = tHtml;
 		} else {
@@ -1557,13 +1557,13 @@ window.addEventListener('message', function (e) {
 
 			var html = '<div style="margin:6px 0 4px 0">'
 				+ '<span style="font-size:11px;font-weight:600;opacity:0.9">'
-				+ icon + ' ' + escapeHtml(title) + ' (' + items.length + ')'
+				+ escapeHtml(icon) + ' ' + escapeHtml(title) + ' (' + escapeHtml(items.length) + ')'
 				+ '</span></div>';
 
 			for (var i = 0; i < items.length; i++) {
 				var p = items[i];
 				var count = p.occurrences > 1
-					? ' <span style="opacity:0.5">(×' + p.occurrences + ')</span>'
+					? ' <span style="opacity:0.5">(×' + escapeHtml(p.occurrences) + ')</span>'
 					: '';
 				var isLast = i === items.length - 1;
 				html += '<div style="padding:2px 0 2px 8px;font-size:11px;'

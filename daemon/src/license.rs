@@ -101,6 +101,10 @@ impl LicenseValidator {
             .map(|value| value.trim().trim_end_matches('/').to_string())
             .filter(|value| !value.is_empty());
 
+        if cache_path.components().any(|c| c == std::path::Component::ParentDir) {
+            return Err(anyhow!("Invalid cache path: path traversal is not permitted"));
+        }
+
         Ok(Self {
             public_key_bytes,
             cache_path,
