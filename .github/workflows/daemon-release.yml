@@ -108,6 +108,47 @@ jobs:
             cp daemon/target/${{ matrix.target }}/release/memix-daemon dist/${{ matrix.binary }}
           fi
 
+      # --- Download and bundle ONNX Runtime library ---
+      - name: Download ONNX Runtime (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # Use the same ONNX Runtime version that matches `ort` in your Cargo.lock.
+          # From the logs, ort 2.0.0-rc.4 uses ONNX Runtime 1.20.1.
+          ONNX_VERSION="1.20.1"
+          if [[ "${{ matrix.target }}" == "aarch64-apple-darwin" ]]; then
+            ONNX_PLATFORM="osx-arm64"
+          else
+            ONNX_PLATFORM="osx-x86_64"
+          fi
+          ONNX_URL="https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/onnxruntime-${ONNX_PLATFORM}-${ONNX_VERSION}.tgz"
+          curl -L --fail --retry 5 --retry-delay 2 -o onnxruntime.tgz "$ONNX_URL"
+          tar -xzf onnxruntime.tgz
+          # Copy the library into the dist folder (same location as the binary)
+          cp onnxruntime-${ONNX_PLATFORM}-${ONNX_VERSION}/lib/libonnxruntime.dylib dist/
+
+      - name: Download ONNX Runtime (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ONNX_VERSION="1.20.1"
+          # Linux x86_64 (glibc) – use the 'linux-x64' package
+          ONNX_PLATFORM="linux-x64"
+          ONNX_URL="https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/onnxruntime-${ONNX_PLATFORM}-${ONNX_VERSION}.tgz"
+          curl -L --fail --retry 5 --retry-delay 2 -o onnxruntime.tgz "$ONNX_URL"
+          tar -xzf onnxruntime.tgz
+          cp onnxruntime-${ONNX_PLATFORM}-${ONNX_VERSION}/lib/libonnxruntime.so dist/
+
+      - name: Download ONNX Runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          ONNX_VERSION="1.20.1"
+          # Windows x64 – use the 'win-x64' package
+          ONNX_PLATFORM="win-x64"
+          ONNX_URL="https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/onnxruntime-${ONNX_PLATFORM}-${ONNX_VERSION}.zip"
+          curl -L --fail --retry 5 --retry-delay 2 -o onnxruntime.zip "$ONNX_URL"
+          unzip onnxruntime.zip
+          cp onnxruntime-${ONNX_PLATFORM}-${ONNX_VERSION}/bin/onnxruntime.dll dist/
+
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
@@ -254,6 +295,7 @@ jobs:
             manifest.json
           fail_on_unmatched_files: true
         env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push manifest to api.memix.dev
