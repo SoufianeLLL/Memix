@@ -776,11 +776,11 @@ async fn main() -> anyhow::Result<()> {
 								.serve_connection(io, TowerToHyperService::new(svc))
 								.await
 							{
-								tracing::error!("UDS connection error: {}", e);
+								tracing::debug!("UDS connection error: {}", e);
 							}
 						});
 					}
-					Err(e) => tracing::error!("Unix accept error: {}", e),
+					Err(e) => tracing::debug!("Unix accept error: {}", e),
 				}
 			}
 		});

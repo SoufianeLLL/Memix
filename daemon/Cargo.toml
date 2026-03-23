@@ -1,6 +1,6 @@
 [package]
 name = "memix-daemon"
-version = "0.3.0-beta"
+version = "0.3.1-beta"
 edition = "2021"
 authors = ["DigitalVize LLC"]
 description = "High-performance Memix backend daemon for persistent AI memory"
@@ -53,8 +53,9 @@ tree-sitter-php = "0.23"
 dotenvy = "0.15.7"
 toml = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-fastembed = { version = "3", default-features = false, features = ["ort-load-dynamic"] }
-ort-sys = "=2.0.0-rc.4"
+fastembed = { version = "5", default-features = false, features = ["ort-download-binaries"] }
+ort-sys = "=2.0.0-rc.11"
+ort = { version = "=2.0.0-rc.11", features = ["load-dynamic", "tls-rustls"] }
 mini-moka = "0.10.3"
 petgraph = "0.6"
 oxc_parser = "0.121"

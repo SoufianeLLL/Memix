@@ -199,29 +199,32 @@ pub fn compute_importance(
     let raw_sccs = tarjan_scc(&graph);
     let scc_groups: Vec<Vec<String>> = raw_sccs
         .into_iter()
-        .filter(|scc| scc.len() > 1) // only actual cycles
-        .map(|scc| {
+        .filter(|scc: &Vec<NodeIndex>| scc.len() > 1) // only actual cycles
+        .map(|scc: Vec<NodeIndex>| {
             scc.into_iter()
                 .filter_map(|idx| reverse_map.get(&idx).cloned())
                 .collect()
         })
         .collect();
 
-    let circular_files: Vec<String> = scc_groups.iter().flat_map(|g| g.iter().cloned()).collect();
+    let circular_files: Vec<String> = scc_groups.iter().flat_map(|g: &Vec<String>| g.iter().cloned()).collect();
 
     // Topological sort (only meaningful if no cycles in the subgraph)
     let topological_order: Vec<String> = match toposort(&graph, None) {
-        Ok(order) => order
-            .into_iter()
-            .filter_map(|idx| reverse_map.get(&idx).cloned())
-            .collect(),
+        Ok(order) => {
+            let order_vec: Vec<NodeIndex> = order;
+            order_vec
+                .into_iter()
+                .filter_map(|idx| reverse_map.get(&idx).cloned())
+                .collect()
+        },
         Err(_) => Vec::new(), // graph has cycles — topo sort not possible
     };
 
     // Combined score: 0.6 × betweenness + 0.4 × pagerank
     let mut combined: Vec<(String, f64)> = node_map
         .keys()
-        .map(|name| {
+        .map(|name: &String| {
             let b = betweenness.get(name).copied().unwrap_or(0.0);
             let p = pagerank.get(name).copied().unwrap_or(0.0);
             (name.clone(), b * 0.6 + p * 0.4)

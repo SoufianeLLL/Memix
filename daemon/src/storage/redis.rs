@@ -210,11 +210,15 @@ impl RedisStorage {
 				special_tokens_map_file: MODEL_SPECIAL_TOKENS_JSON.to_vec(),
 				tokenizer_config_file: MODEL_TOKENIZER_CONFIG_JSON.to_vec(),
 			},
+            external_initializers: vec![],
+            output_key: None,
+            pooling: None,
+            quantization: Default::default(),
 		}
 	}
 
-	fn embedding_model() -> anyhow::Result<&'static TextEmbedding> {
-		static MODEL: OnceCell<TextEmbedding> = OnceCell::new();
+	fn embedding_model() -> anyhow::Result<&'static std::sync::Mutex<TextEmbedding>> {
+		static MODEL: OnceCell<std::sync::Mutex<TextEmbedding>> = OnceCell::new();
 		if let Some(model) = MODEL.get() {
 			return Ok(model);
 		}
@@ -225,7 +229,7 @@ impl RedisStorage {
 		)
 		.map_err(|e| anyhow::anyhow!("fastembed init failed: {}", e))?;
 
-		let _ = MODEL.set(model);
+		let _ = MODEL.set(std::sync::Mutex::new(model));
 		MODEL
 			.get()
 			.ok_or_else(|| anyhow::anyhow!("fastembed model initialization did not persist"))
@@ -240,7 +244,8 @@ impl RedisStorage {
 
 	async fn embed_text_real(text: String) -> anyhow::Result<Vec<f32>> {
 		let handle = tokio::task::spawn_blocking(move || {
-			let model = Self::embedding_model()?;
+			let model_mutex = Self::embedding_model()?;
+            let mut model = model_mutex.lock().unwrap();
 			let out = model
 				.embed(vec![text], None)
 				.map_err(|e| anyhow::anyhow!("fastembed embed failed: {}", e))?;
