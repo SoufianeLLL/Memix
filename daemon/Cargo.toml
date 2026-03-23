@@ -1,6 +1,6 @@
 [package]
 name = "memix-daemon"
-version = "0.2.3-beta"
+version = "0.3.0-beta"
 edition = "2021"
 authors = ["DigitalVize LLC"]
 description = "High-performance Memix backend daemon for persistent AI memory"
@@ -64,7 +64,7 @@ oxc_span = "0.121"
 oxc_allocator = "0.121"
 oxc_ast = "0.121.0"
 walkdir = "2"
-
+blake3 = "1"
 
 [profile.release]
 lto = true

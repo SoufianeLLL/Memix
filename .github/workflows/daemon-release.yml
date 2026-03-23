@@ -248,7 +248,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "Daemon ${{ github.ref_name }}"
+          name: "Daemon v${GITHUB_REF_NAME#daemon-v}"
           files: |
             release-assets/memix-daemon-*
             manifest.json
