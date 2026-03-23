@@ -123,7 +123,6 @@ impl LifetimeTotals {
         self.total_context_tokens_compiled += session.context_tokens_compiled;
         self.total_estimated_tokens_saved += session.estimated_tokens_saved;
         self.total_files_indexed += session.files_skeleton_indexed;
-        self.sessions_recorded += 1;
         self.last_updated = chrono::Utc::now().to_rfc3339();
     }
 }
@@ -133,6 +132,7 @@ pub struct TokenTracker {
     pub session: Arc<SessionCounters>,
     lifetime_path: PathBuf,
     lifetime: RwLock<LifetimeTotals>,
+    session_recorded: std::sync::atomic::AtomicBool,
 }
 
 impl TokenTracker {
@@ -153,12 +153,50 @@ impl TokenTracker {
             session: Arc::new(SessionCounters::new()),
             lifetime_path,
             lifetime: RwLock::new(lifetime),
+            // AtomicBool starts false — the first flush will set it true
+            // and count exactly one session, not one per flush cycle
+            session_recorded: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Loads lifetime totals from disk into an existing tracker instance.
+    /// Called after the daemon is already running to restore historical stats
+    /// without blocking startup. Session counters are untouched.
+    pub async fn load_lifetime_into(
+        tracker: &Arc<TokenTracker>,
+        project_id: &str,
+        data_dir: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        let lifetime_path = data_dir.join("token_lifetime.json");
+        if let Ok(bytes) = tokio::fs::read(&lifetime_path).await {
+            if let Ok(loaded) = serde_json::from_slice::<LifetimeTotals>(&bytes) {
+                let mut lifetime = tracker.lifetime.write().await;
+                *lifetime = loaded;
+                tracing::debug!("TokenTracker lifetime totals restored from disk");
+            }
+        }
+        Ok(())
+    }
+
+    /// Synchronous fallback constructor used when the async load path times out.
+    /// Session counters always start at zero. Lifetime totals start empty.
+    /// The path is preserved so the next successful flush writes to the correct file.
+    pub fn default_empty(project_id: &str, data_dir: &std::path::Path) -> Self {
+        Self {
+            session: Arc::new(SessionCounters::new()),
+            lifetime_path: data_dir.join("token_lifetime.json"),
+            lifetime: RwLock::new(LifetimeTotals {
+                project_id: project_id.to_string(),
+                ..Default::default()
+            }),
+            session_recorded: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
     /// Call this when the daemon is shutting down gracefully, or on a periodic
     /// flush timer (every 5 minutes is a good interval).
     pub async fn flush_session_to_lifetime(&self, project_id: &str) -> anyhow::Result<()> {
+        tracing::info!("!!! session_recorded: {}", self.session_recorded.load(Ordering::Relaxed));
         let snapshot = self.session.snapshot();
         if snapshot.ai_calls == 0 && snapshot.context_compilations == 0 {
             return Ok(()); // Nothing to flush
@@ -166,6 +204,12 @@ impl TokenTracker {
 
         let mut lifetime = self.lifetime.write().await;
         lifetime.absorb_session(&snapshot, project_id);
+
+        // Only count a new session once per daemon process lifetime,
+        // not once per 5-minute flush cycle
+        if !self.session_recorded.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            lifetime.sessions_recorded += 1;
+        }
 
         if let Some(parent) = self.lifetime_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
