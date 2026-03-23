@@ -46,7 +46,7 @@ pub struct CollaborativeBrainMatrix {
     /// True Vector Clock tracking causality across the distributed mesh
     pub clock: VClock<ActorId>,
 
-    /// The local author ID interacting with this specific daemon daemon
+    /// The local author ID interacting with this specific daemon
     pub local_actor: ActorId,
 }
 
