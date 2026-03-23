@@ -26,6 +26,14 @@ pub struct RedisStorage {
 	manager: tokio::sync::RwLock<Option<redis::aio::ConnectionManager>>,
 	data_dir: PathBuf,
 	embedding_cache: Cache<u64, Vec<f32>>,
+
+	/// In-memory cache for get_entries results. Avoids redundant Redis full-hash
+    /// reads when the panel refreshes rapidly — entries are valid for 20 seconds.
+    /// Invalidated immediately when any upsert or delete touches the same project.
+	entry_cache: tokio::sync::RwLock<std::collections::HashMap
+        String,
+        (std::time::Instant, Vec<crate::brain::schema::MemoryEntry>),
+    >>,
 }
 
 impl RedisStorage {
@@ -157,6 +165,8 @@ impl RedisStorage {
 			manager: tokio::sync::RwLock::new(None),
 			data_dir,
 			embedding_cache: Cache::builder().max_capacity(10_000).build(),
+			// Empty cache — populated lazily on first get_entries call per project.
+			entry_cache: tokio::sync::RwLock::new(std::collections::HashMap::new()),
 		})
 	}
 
@@ -469,14 +479,43 @@ impl StorageBackend for RedisStorage {
 	async fn get_entries(&self, project_id: &str) -> Result<Vec<MemoryEntry>> {
 		tracing::debug!("📦 get_entries called for project: {}", project_id);
 
-		// Log the Redis URL (without credentials)
-	    	tracing::debug!("Attempting to get Redis connection...");
+		// Cache TTL: 20 seconds. This collapses rapid panel refreshes — which each
+		// independently call get_entries — into at most one Redis round-trip per window.
+		// Short enough that stale data is never a practical problem in a dev session.
+		const CACHE_TTL_SECS: u64 = 20;
 
+		// Check cache under a read lock first (cheap, no Redis round-trip)
+		{
+			let cache = self.entry_cache.read().await;
+			if let Some((fetched_at, entries)) = cache.get(project_id) {
+				if fetched_at.elapsed().as_secs() < CACHE_TTL_SECS {
+					tracing::debug!("📦 get_entries cache hit for project: {}", project_id);
+					return Ok(entries.clone());
+				}
+			}
+		}
+
+		// Cache miss or TTL expired — fetch from Redis
+		tracing::debug!("📦 get_entries cache miss — fetching from Redis for: {}", project_id);
+		let entries = self.fetch_entries_from_redis(project_id).await?;
+
+		// Populate cache under a write lock
+		{
+			let mut cache = self.entry_cache.write().await;
+			cache.insert(
+				project_id.to_string(),
+				(std::time::Instant::now(), entries.clone()),
+			);
+		}
+
+		Ok(entries)
+	}
+
+	/// Performs the actual Redis HVALS read for a project. Called only on cache miss.
+	/// Separated from get_entries so the cache wrapper stays clean and readable.
+	async fn fetch_entries_from_redis(&self, project_id: &str) -> Result<Vec<MemoryEntry>> {
 		match self.get_conn().await {
 			Ok(mut conn) => {
-				tracing::debug!("Got managed Redis connection");
-				
-				tracing::debug!("Executing HGETALL for key: {}", project_id);
 				match conn.hvals::<&str, Vec<String>>(project_id).await {
 					Ok(values) => {
 						tracing::debug!("Got {} values from Redis", values.len());
@@ -487,22 +526,19 @@ impl StorageBackend for RedisStorage {
 							}
 						}
 						Ok(entries)
-					},
+					}
 					Err(e) => {
-						tracing::error!("❌ Redis HGETALL failed: {}", e);
+						tracing::error!("❌ Redis HVALS failed: {}", e);
 						Err(anyhow::anyhow!("Redis command failed: {}", e))
 					}
 				}
-			},
+			}
 			Err(e) => {
 				tracing::error!("❌ Failed to get Redis connection: {}", e);
-				
 				if e.to_string().contains("refused") {
-					tracing::error!("🔴 REDIS CONNECTION REFUSED");
-					tracing::error!("Verify daemon is using the expected redis_url (config.toml or MEMIX_REDIS_URL), and that the Redis host/port is reachable from this machine.");
+					tracing::error!("🔴 REDIS CONNECTION REFUSED — verify MEMIX_REDIS_URL and host reachability");
 				}
-				
-				return Err(anyhow::anyhow!("Redis connection failed: {}", e));
+				Err(anyhow::anyhow!("Redis connection failed: {}", e))
 			}
 		}
 	}
@@ -574,6 +610,13 @@ impl StorageBackend for RedisStorage {
 	}
 
 	async fn upsert_entry(&self, project_id: &str, entry: MemoryEntry) -> Result<()> {
+		// Invalidate the entry cache immediately so the next read reflects this write.
+		// Without this, a pending.json update would be invisible for up to 20 seconds.
+		{
+			let mut cache = self.entry_cache.write().await;
+			cache.remove(project_id);
+		}
+
 		let mut conn = self.get_conn().await?;
 		let existing_count: u64 = conn.hlen(project_id).await?;
 		let already_exists: bool = conn.hexists(project_id, &entry.id).await?;
@@ -609,6 +652,12 @@ impl StorageBackend for RedisStorage {
 	}
 
 	async fn purge_project(&self, project_id: &str) -> Result<()> {
+		// Invalidate the entry cache on delete for the same reason as upsert.
+		{
+			let mut cache = self.entry_cache.write().await;
+			cache.remove(project_id);
+		}
+		
 		let mut conn = self.get_conn().await?;
 		let _: () = conn.del(project_id).await?;
 		self.purge_brain_dir().await;
