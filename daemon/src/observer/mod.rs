@@ -4,6 +4,7 @@ pub mod differ;
 pub mod graph;
 pub mod dna;
 pub mod imports;
+pub mod patterns;
 pub mod skeleton;
 pub mod call_graph;
 pub mod importance;

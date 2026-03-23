@@ -19,7 +19,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 const EMBEDDING_DIM: usize = 384;
@@ -128,6 +127,57 @@ impl EmbeddingStore {
                 dirty: std::sync::atomic::AtomicBool::new(false),
             }),
         }
+    }
+
+    /// Loads embedding data from disk (and Redis fallback) into an existing store.
+    /// Used for deferred loading after the daemon socket is already bound.
+    pub async fn load_into(
+        store: &EmbeddingStore,
+        project_id: &str,
+        data_dir: &std::path::Path,
+        redis_client: Option<&redis::Client>,
+    ) -> anyhow::Result<()> {
+        let bin_path = data_dir.join("skeleton_embeddings.bin");
+        let mut index = std::collections::HashMap::new();
+        let mut matrix: Vec<Vec<f32>> = Vec::new();
+        let mut ids: Vec<String> = Vec::new();
+
+        let loaded_from_disk = Self::load_from_disk(&bin_path, &mut index, &mut matrix, &mut ids);
+
+        if !loaded_from_disk {
+            if let Some(client) = redis_client {
+                let redis_key = format!("embeddings:{}", project_id);
+                let _ = Self::load_from_redis(client, &redis_key, &mut index, &mut matrix, &mut ids).await;
+            }
+        }
+
+        if !index.is_empty() {
+            let mut store_index = store.inner.index.write().await;
+            let mut store_matrix = store.inner.matrix.write().await;
+            let mut store_ids = store.inner.id_by_position.write().await;
+            *store_index = index;
+            *store_matrix = matrix;
+            *store_ids = ids;
+            tracing::info!("EmbeddingStore: deferred load populated {} vectors", store_index.len());
+        }
+
+        Ok(())
+    }
+
+    /// Flush dirty state to the local binary file only — no Redis write.
+    /// Use this during normal periodic flushes to avoid Redis network costs.
+    /// Call flush() (with a Redis client) only on graceful shutdown or when
+    /// multi-IDE support requires cross-instance synchronization.
+    pub async fn flush_disk_only(&self) -> Result<()> {
+        if !self.inner.dirty.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(());
+        }
+        let matrix = self.inner.matrix.read().await;
+        let ids = self.inner.id_by_position.read().await;
+        Self::persist_to_disk_internal(&self.inner.bin_path, &ids, &matrix)?;
+        self.inner.dirty.store(false, std::sync::atomic::Ordering::Relaxed);
+        tracing::debug!("EmbeddingStore: flushed {} vectors to disk (Redis sync skipped)", ids.len());
+        Ok(())
     }
 
     fn load_from_disk(
@@ -256,7 +306,7 @@ impl EmbeddingStore {
             return Vec::new();
         }
 
-        let index = self.inner.index.read().await;
+        let _index = self.inner.index.read().await;
         let matrix = self.inner.matrix.read().await;
         let ids = self.inner.id_by_position.read().await;
 
