@@ -55,3 +55,11 @@ The `tokio-rustls-comp` feature provides TLS support via rustls (pure Rust, no s
 ## Key File
 
 `daemon/src/storage/redis.rs` — the `RedisStorage` struct, `get_conn()` method, skeleton hash operations, and JSON mirror write path.
+
+## Brain Entry Cache
+
+To further reduce Redis network traffic, `RedisStorage` maintains an in-memory `entry_cache` — a `tokio::sync::RwLock<HashMap>` keyed by `project_id`, storing `(Instant, Vec<MemoryEntry>)` tuples with a 20-second TTL. When a brain read is requested, the cache is checked first; if the entry is present and not expired, it is returned without any Redis round-trip.
+
+The cache is automatically invalidated on writes: both `upsert_entry` and `delete_entry` synchronously remove the affected project_id from the cache before touching Redis. This preserves write-after-write consistency — a write followed immediately by a read will see the fresh data from Redis, not a stale cached version.
+
+This optimization is particularly effective for the context compiler, which may issue multiple brain queries in quick succession during a single compilation pass. The first query populates the cache; subsequent queries for the same project hit memory until the TTL expires.

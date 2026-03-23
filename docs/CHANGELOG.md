@@ -4,6 +4,123 @@ All notable changes to the "memix" extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+Here's the markdown to add at the top of your changelog entries, above whatever the previous most recent version was:
+
+---
+
+## [1.0.9-beta] — 2026-03-23
+### Fixed
+- The daemon's most critical reliability problem was that the Unix socket could bind
+up to 11 seconds after process start because migrations, EmbeddingStore, and
+TokenTracker all performed Redis I/O synchronously before the socket was created.
+On throttled cloud Redis connections (Upstash free tier under load), this caused
+consistent `ECONNREFUSED` failures at the extension health check. The entire
+startup sequence has been restructured into two phases: everything before the
+socket bind is now synchronous and Redis-free (EmbeddingStore and TokenTracker
+both start empty), and all Redis-dependent work runs in deferred background tasks
+that start 500ms–2s after the socket is already serving health checks. The daemon
+now becomes reachable within ~50ms of process start regardless of Redis latency.
+- The `warning_signature_*` entries were flooding the Brain Key Coverage panel
+because the signature comparison logic fired on every file-save event even when
+the AST cache had no prior snapshot for that file (i.e., every file on first open
+looked like a "breaking change" from empty to its current state). Added a guard
+that requires `old_bytes` to be non-empty before a warning entry is written, which
+eliminates the entire class of false positives that appear at daemon startup and
+after daemon restarts.
+- The Sessions counter in Token Intelligence was incrementing on every 5-minute flush
+cycle rather than once per daemon lifetime. The `LifetimeTotals::absorb_session`
+method was incrementing `sessions_recorded` unconditionally, while a new
+`session_recorded: AtomicBool` field was added to `TokenTracker` to ensure the
+increment happens at most once per process — the first flush sets the flag, all
+subsequent flushes skip the increment.
+- The `openBrainKey` click handler in the Brain Key Coverage panel was silently
+swallowed because no corresponding `case` existed in the `onDidReceiveMessage`
+switch in `debug-panel.ts`. Clicks now open the `.memix/brain/<key>.json` mirror
+file if it exists on disk, or an untitled JSON document with the raw Redis value
+if it does not.
+- The hot zones and stable zones lists were rendering with commas between items
+because `.map()` was being string-concatenated without `.join('')`, triggering
+JavaScript's implicit array-to-string coercion. All affected map chains now
+explicitly join with an empty string.
+- Rust module paths (`crate::brain::schema`, `chrono::Utc`, etc.) were appearing in
+the Related Files list in the Predictive Intent panel because the dependency graph
+import filter only blocked bare single-word package names. Extended the filter to
+also reject any import specifier containing `::`, which covers all Rust use-paths
+while leaving absolute and relative file paths intact.
+- The tree-sitter bindings for `language_tsx`, `language_typescript`, and
+`language` were renamed from callable functions to `LanguageFn` constants
+(`LANGUAGE_TSX`, `LANGUAGE_TYPESCRIPT`, `LANGUAGE`) in v0.23 of the respective
+crates. Updated all three call sites in `patterns.rs` to use the new constant
+names.
+
+### Added
+- A 20-second in-memory cache for `get_entries` results was added to `RedisStorage`
+as a `tokio::sync::RwLock<HashMap<String, (Instant, Vec<MemoryEntry>)>>`. The
+cache is keyed by project ID and collapses rapid panel refreshes — which each
+independently call `get_entries` — into at most one Redis round-trip per 20-second
+window. Both `upsert_entry` and `delete_entry` synchronously invalidate the cache
+for the affected project before touching Redis, preserving write-through
+consistency so brain updates from `pending.json` are visible on the next read
+without waiting for TTL expiry.
+- `PatternEngine` (`observer/patterns.rs`) provides on-demand structural pattern
+discovery across three tiers. Tier 1 (Known) detects 15+ universal software
+patterns — async/await, guard clauses, repository, factory, singleton, and others
+— by analysing function body structure from the tree-sitter AST. Tier 2
+(Framework) reads `package.json` dependencies and cross-references them against a
+curated map to detect Next.js App Router patterns, Prisma ORM, Tailwind CSS,
+Vitest, custom hooks, and similar framework-specific shapes. Tier 3 (Emergent)
+uses four unsupervised discovery strategies — function shape clustering, import
+constellation analysis, export shape detection, and error-handling fingerprinting
+— to surface patterns that have no predefined name but recur consistently in the
+codebase. The engine is exposed via `GET /api/v1/observer/patterns`, runs in
+`spawn_blocking` to avoid stalling the async executor, and is triggered manually
+from the panel rather than on every file save.
+- `EmbeddingStore::flush_disk_only()` was added as the new target for the 5-minute
+periodic flush task. It writes the local binary file only and skips the Redis sync
+entirely, eliminating ~30MB/day of outbound Redis traffic on the free tier. The
+Redis sync path (`flush()` with a client argument) is preserved and commented with
+a `MULTI-IDE NOTE` explaining when to re-enable it once cross-IDE sharing support
+is built.
+- `EmbeddingStore::load_into()` and `TokenTracker::load_lifetime_into()` were added
+as deferred-loading counterparts to the existing constructors. Both accept an
+already-constructed instance and populate it from disk or Redis after the fact,
+enabling the new two-phase startup architecture where instances start empty and
+load real data in background tasks after the socket is bound.
+
+### Changed
+- The Observer Code DNA section in the debug panel now shows languages and rules as
+separate, independently refreshing subsections rather than mixing them into the
+patterns block. Languages are rendered from the live DNA snapshot on every panel
+refresh using a `stat`-row layout with file counts. Rules source only appears when
+non-default rules are active, keeping the panel clean for the common case.
+- The Daemon Timeline now displays human-readable sentences instead of raw JSON
+payloads. `formatTimelineEvent` in `debug-panel.ts` maps each `SessionEvent`
+variant to a descriptive English phrase — `AstMutation` becomes "File changed —
+src/server.rs (3 nodes changed)", `IntentDetected` maps internal snake_case names
+to labels like "Fixing a bug", and `ScorePenalty` includes a severity tier label.
+Unknown future event types fall back to a camelCase-split representation rather
+than raw JSON.
+- The architecture label in Observer Code DNA maps raw internal identifiers like
+`component-driven/application-layered` to display strings like
+"Component-driven UI". Pattern tag names like `try-catch` and `edge-guards` map
+to "Error handling (try/catch)" and "Guard clauses". Both mappings cover the full
+set of values currently emitted by the DNA engine, with a `.replace(/-/g, ' ')`
+fallback for any future unlabelled values.
+- `compileContext` calls are now throttled to once per 30 seconds per active file in
+`sendUpdate`. The other advanced calls — blast radius, causal chain, proactive
+risk, and importance scores — are unaffected and run on every refresh because they
+are lightweight. When the throttle suppresses a compile, the panel keeps displaying
+the previously compiled context without flicker. The throttle resets immediately
+whenever the active file changes.
+- The inline `<script>` block from `debug-panel.ts` has been extracted to
+`media/panel.js` and loaded via `getWebviewScript()`, following the same pattern
+as the CSS extraction to `media/app.css`. The TypeScript file now contains only
+class logic and HTML structure; all webview JavaScript lives in the separate file.
+- `stripRoot` is now defined at module scope in `panel.js` and updated from
+`data.workspaceRoot` on every `update` message, making it available to all
+command handlers including `patternReport`. Previously it was a local function
+inside the `update` block and unreachable from other handlers.
+
 ## [1.0.8-beta] - 2026-03-21 (Token Intelligence Panel)
 ### Features
 - **Token Intelligence Debug Panel**: New "Token Intelligence" section in Advanced tab displaying session and lifetime token metrics

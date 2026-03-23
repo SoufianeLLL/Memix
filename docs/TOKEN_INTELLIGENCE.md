@@ -40,6 +40,16 @@ A freshly started daemon with an empty embedding store will see 100% misses unti
 
 The `record_context_compilation` method on `SessionCounters` is called by the context compiler immediately after each successful compilation, passing both the actual token count and the naive estimate. The method computes the saving internally and atomically increments all relevant counters.
 
+### TokenTracker Loading Methods
+
+`TokenTracker::load()` creates a new instance (used in tests and legacy paths). It reads existing lifetime totals from disk or starts fresh if none exist, and initializes empty session counters.
+
+`TokenTracker::load_lifetime_into()` is the deferred loading path used during daemon startup. It mutates an existing `TokenTracker` instance's lifetime field after the daemon is already running. This distinction matters because Phase One startup creates an empty `TokenTracker` with `default_empty()` so the socket can bind immediately; Phase Two (at 500ms) calls `load_lifetime_into()` to populate the lifetime totals from disk without blocking the startup thread.
+
+### Session Recorded Flag
+
+The `TokenTracker` struct includes a `session_recorded: std::sync::atomic::AtomicBool` field. This flag prevents the `sessions_recorded` counter from incrementing on every 5-minute flush cycle. The counter only increments once per actual daemon session (startup → shutdown), not on periodic persistence events. This ensures the lifetime "sessions recorded" metric accurately reflects real working sessions rather than the number of times the flush task ran.
+
 ## Persistence Format
 
 The lifetime totals file at `.memix/token_lifetime.json` is a human-readable JSON file. It can be inspected, backed up, or deleted independently of any other daemon state. Deleting it resets only the lifetime totals — session counters and the skeleton index are unaffected. The file is written using `tokio::fs::write` directly (not with a temp-file rename) because the data is append-only totals that are safe to partially overwrite, and the lower I/O overhead on the periodic flush path is preferable.

@@ -38,6 +38,16 @@ For the expected scale of a developer's project (hundreds to low thousands of in
 
 The `flush` method writes dirty in-memory state to both tiers simultaneously. It first writes the binary file atomically, then spawns an async task for the Redis write. The flush is called on a 30-second timer in the daemon's main task and also during graceful shutdown. The background indexer calls flush explicitly after completing its full workspace scan.
 
+## API Methods
+
+### `flush_disk_only()`
+
+The periodic flush path that writes only the local binary file and skips Redis entirely. Used by the 30-second flush timer when the embedding store is single-IDE — since the local file is the source of truth and Redis is only for multi-IDE synchronization. When multi-IDE support becomes a priority, revert to `flush()` to ensure cross-IDE consistency.
+
+### `load_into()`
+
+The deferred loading path that populates an already-constructed empty store from disk or Redis without blocking the startup thread. Called at 1-second defer during daemon startup — the store is created empty in Phase One, then `load_into()` fills it in Phase Two. If the local binary file exists, it loads from disk; otherwise it falls back to Redis. This pattern allows the daemon to bind its socket and accept health checks before any I/O occurs.
+
 ## Key File
 
 `daemon/src/observer/embedding_store.rs` contains the complete implementation including the binary format specification, the write-through flush logic, the cosine similarity search, and the load path that falls back from disk to Redis.

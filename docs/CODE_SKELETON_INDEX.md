@@ -85,3 +85,15 @@ The context compiler receives skeleton entries as a separate input alongside bra
 ## API Endpoint
 
 `GET /api/v1/skeleton/stats/:project_id` returns the current FSI count, FuSI count, total entries, and the embedding store size.
+
+## Pattern Discovery (PatternEngine)
+
+The `PatternEngine` provides three-tier pattern detection that runs on-demand rather than continuously:
+
+**Known Patterns** — AST structural heuristics detect common code patterns: guard clauses, early returns, validation functions, error handling patterns, and async/await patterns. These are identified via AST node inspection and function body analysis.
+
+**Framework Patterns** — package.json dependency detection identifies the frameworks in use (React, Express, etc.) and loads associated pattern rules. Framework-specific patterns like React hooks usage or Express middleware chains are detected based on imports and call patterns.
+
+**Emergent Patterns** — function shape clustering and sequence detection identifies recurring code shapes that aren't framework-specific. Functions with similar parameter structures, return types, and call sequences are clustered. Common sequences (e.g., validate → sanitize → process → respond) are detected via N-gram analysis of function call chains.
+
+PatternEngine runs via `spawn_blocking` because the workspace walk is synchronous I/O. It is triggered on-demand via `POST /api/v1/observer/patterns` rather than running automatically — this keeps the daemon responsive during normal editing while allowing deep analysis when requested.

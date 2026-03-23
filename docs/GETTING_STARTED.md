@@ -51,7 +51,7 @@ The **file watcher** starts observing your workspace immediately. Every file sav
 
 The **background indexer** starts 5 seconds after daemon launch and walks the entire workspace at a throttled pace (10 files per second by default). This is the one-time cost of building the full Code Skeleton Index — similar to TypeScript's language server indexing process. On subsequent daemon restarts, the index is loaded from the persisted binary file at `.memix/skeleton_embeddings.bin` in milliseconds.
 
-The **token tracker** begins recording session statistics: context compilations, tokens compiled by Memix, tokens sent to AI, and the estimated savings from structural compression versus a naive paste approach.
+The **token tracker** begins recording session statistics: context compilations, tokens compiled by Memix, tokens sent to AI, and the estimated savings from structural compression versus a naive paste approach. Both the EmbeddingStore and TokenTracker start empty and load in the background, so the panel becomes responsive within 1–2 seconds even on slow Redis connections, with data appearing progressively as the background tasks complete.
 
 ## How It Works (Architecture Summary)
 

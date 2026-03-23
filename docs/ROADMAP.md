@@ -76,6 +76,14 @@
 
 ---
 
+## Released — v1.0.9-beta (Performance & Pattern Discovery)
+
+- ✅ **Brain Entry Cache** — `RedisStorage` now maintains an in-memory `entry_cache` with 20-second TTL, keyed by project_id. Synchronously invalidated on writes to preserve consistency. Reduces Redis round-trips for repeated brain queries during context compilation.
+- ✅ **Deferred Startup Architecture** — Two-phase startup: Phase One binds the socket in under 50ms (empty stores, no I/O), Phase Two loads lifetime totals, embeddings, and runs migrations in the background. Health checks succeed before Redis I/O begins.
+- ✅ **PatternEngine** — Three-tier pattern detection: Known (AST structural heuristics), Framework (package.json dependency detection), and Emergent (function shape clustering and sequence detection). Runs on-demand via `POST /api/v1/observer/patterns`.
+
+---
+
 ## Near-Term
 
 ### Context Orchestrator

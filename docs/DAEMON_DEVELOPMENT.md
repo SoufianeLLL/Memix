@@ -45,6 +45,7 @@ Configuration is loaded in this priority order, with later sources overriding ea
 | `MEMIX_OXC_RESOLVE_NODE_MODULES` | `false` | Include node_modules in import resolution |
 | `MEMIX_FORCE_REINDEX` | `false` | Force full workspace rescan on next start |
 | `MEMIX_INDEXER_RATE_LIMIT` | `10` | Background indexer files-per-second throttle |
+| `MEMIX_REDIS_CACHE_TTL_SECS` | `20` | Brain entry cache TTL in seconds (currently hardcoded, future configurable) |
 
 ## Project Structure
 
@@ -102,13 +103,26 @@ daemon/
 
 Understanding the daemon's startup order helps when debugging why certain features aren't immediately available after launch.
 
-First, configuration loads and Redis connects. Then `EmbeddingStore` loads from `.memix/skeleton_embeddings.bin` (falling back to Redis if the file is absent), and `TokenTracker` loads lifetime totals from `.memix/token_lifetime.json`. Migrations run for the configured project ID.
+The startup is split into two phases: synchronous initialization (always completes in under 50ms) and deferred background tasks (progressive loading). This split exists because cloud Redis latency is unpredictable — the socket must bind before any Redis I/O begins so the extension's health check can succeed immediately.
 
-The Axum router is built with all state attached to `AppState`, then the Unix socket is bound and the accept loop is spawned — at this point the extension's health check can succeed. TCP is also bound for development and Windows compatibility.
+**Phase One — Synchronous (under 50ms):**
+1. Configuration loads from defaults, config file, and environment variables
+2. In-memory data structures are created (DependencyGraph, CallGraph, PatternEngine)
+3. `EmbeddingStore::empty()` creates an empty store (no disk/Redis I/O)
+4. `TokenTracker::default_empty()` creates empty session counters (lifetime loads later)
+5. The Axum router is built with all state attached to `AppState`
+6. Unix socket is bound at `~/.memix/daemon.sock` and accept loop spawns
+7. TCP is also bound for development and Windows compatibility
 
-Five seconds after startup, the `BackgroundIndexer` spawns. If the embedding store is empty (first run), it walks the workspace at the configured rate limit, building FSI entries and embeddings for every source file it finds. A periodic flush task runs every 5 minutes to persist session token totals and dirty embedding state.
+At this point the extension's health check can succeed — the daemon is "up" even though data is still loading.
 
-The file watcher goroutine starts processing events — save events trigger the full Layer 1 → Layer 2 → Layer 3 pipeline for the saved file, while delete events trigger graph cleanup.
+**Phase Two — Deferred Background Tasks:**
+- **500ms:** `TokenTracker` loads lifetime totals from `.memix/token_lifetime.json` (or starts fresh)
+- **1s:** `EmbeddingStore` loads from `.memix/skeleton_embeddings.bin` (or starts empty, falls back to Redis)
+- **2s:** Database migrations run for the configured project ID
+- **5s:** `BackgroundIndexer` spawns. If the embedding store is empty (first run), it walks the workspace at the configured rate limit, building FSI entries and embeddings for every source file it finds.
+
+The file watcher goroutine starts processing events immediately after Phase One — save events trigger the full Layer 1 → Layer 2 → Layer 3 pipeline for the saved file, while delete events trigger graph cleanup. A periodic flush task runs every 5 minutes to persist session token totals and dirty embedding state.
 
 ## Key Architectural Facts for Contributors
 
