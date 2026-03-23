@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import * as crypto from 'crypto';
 import * as http from 'http';
 import * as https from 'https';
@@ -73,9 +72,19 @@ export class DaemonRuntimeManager {
 		return { storageRoot, binDir, binaryPath, versionFile };
 	}
 
-	static getLocalDevBinaryPath(extensionPath: string): string {
+	static getLocalDevBinaryPath(extensionPath: string): string | null {
 		const binaryName = process.platform === 'win32' ? 'memix-daemon.exe' : 'memix-daemon';
-		return path.join(extensionPath, '..', 'daemon', 'target', 'release', binaryName);
+		// Check release first, then fall back to debug
+		const releasePath = path.join(extensionPath, '..', 'daemon', 'target', 'release', binaryName);
+		const debugPath = path.join(extensionPath, '..', 'daemon', 'target', 'debug', binaryName);
+
+		if (fs.existsSync(releasePath)) {
+			return releasePath;
+		}
+		if (fs.existsSync(debugPath)) {
+			return debugPath;
+		}
+		return null;
 	}
 
 	static getCurrentPlatformKey(): PlatformKey {
@@ -102,7 +111,7 @@ export class DaemonRuntimeManager {
 		onStateChange?: (state: DaemonReadinessState) => void,
 	): Promise<DaemonBootstrapResult> {
 		const localDevBinaryPath = this.getLocalDevBinaryPath(extensionPath);
-		if (fs.existsSync(localDevBinaryPath) && context.extensionMode === vscode.ExtensionMode.Development) {
+		if (localDevBinaryPath && context.extensionMode === vscode.ExtensionMode.Development) {
 			const result: DaemonBootstrapResult = {
 				binaryPath: localDevBinaryPath,
 				version: 'dev-local',

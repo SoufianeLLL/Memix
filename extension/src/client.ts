@@ -25,14 +25,14 @@ function getRequestOptions(method: string, requestPath: string): http.RequestOpt
 		};
 	}
 	// Windows: TCP fallback since Unix sockets aren't available
-    if (IS_WINDOWS) {
-        return {
-            hostname: '127.0.0.1',
-            port: DAEMON_TCP_PORT,
-            path: requestPath,
-            method,
-        };
-    }
+	if (IS_WINDOWS) {
+		return {
+			hostname: '127.0.0.1',
+			port: DAEMON_TCP_PORT,
+			path: requestPath,
+			method,
+		};
+	}
 	return {
 		socketPath: SOCKET_PATH,
 		path: requestPath,
@@ -58,36 +58,36 @@ async function buildDaemonError(res: http.IncomingMessage, requestPath: string):
 }
 
 export enum MemoryKind {
-    Fact = 'fact',
-    Decision = 'decision',
-    Warning = 'warning',
-    Pattern = 'pattern',
-    Context = 'context'
+	Fact = 'fact',
+	Decision = 'decision',
+	Warning = 'warning',
+	Pattern = 'pattern',
+	Context = 'context'
 }
 
 export enum MemorySource {
-    UserManual = 'user_manual',
-    AgentExtracted = 'agent_extracted',
-    FileWatcher = 'file_watcher',
-    GitArchaeology = 'git_archaeology'
+	UserManual = 'user_manual',
+	AgentExtracted = 'agent_extracted',
+	FileWatcher = 'file_watcher',
+	GitArchaeology = 'git_archaeology'
 }
 
 export interface MemoryEntry {
-    id: string;
-    project_id: string;
-    kind: MemoryKind;
-    content: string;
-    tags: string[];
-    source: MemorySource;
-    superseded_by: string | null;
-    contradicts: string[];
+	id: string;
+	project_id: string;
+	kind: MemoryKind;
+	content: string;
+	tags: string[];
+	source: MemorySource;
+	superseded_by: string | null;
+	contradicts: string[];
 	parent_id?: string | null;
 	caused_by?: string[];
 	enables?: string[];
-    created_at: string;
-    updated_at: string;
-    access_count: number;
-    last_accessed_at: string | null;
+	created_at: string;
+	updated_at: string;
+	access_count: number;
+	last_accessed_at: string | null;
 }
 
 export interface ObserverDna {
@@ -552,15 +552,15 @@ export class MemoryClient {
 	/**
 	 * Retrieves memory from the Rust Daemon over localhost HTTP
 	 */
-    static async getMemory(projectId: string): Promise<MemoryEntry[]> {
-        return new Promise((resolve, reject) => {
-            const requestPath = `${API_PREFIX}/memory/${projectId}`;
+	static async getMemory(projectId: string): Promise<MemoryEntry[]> {
+		return new Promise((resolve, reject) => {
+			const requestPath = `${API_PREFIX}/memory/${projectId}`;
 			const options = getRequestOptions('GET', requestPath);
-            const req = http.request(options, (res) => {
-                if (res.statusCode !== 200) {
+			const req = http.request(options, (res) => {
+				if (res.statusCode !== 200) {
 					buildDaemonError(res, requestPath).then(reject, reject);
-                    return;
-                }
+					return;
+				}
 
 				readResponseBody(res).then((data) => {
 					try {
@@ -569,91 +569,91 @@ export class MemoryClient {
 						reject(e);
 					}
 				}, reject);
-            });
-            req.on('error', reject);
-            req.end();
-        });
-    }
+			});
+			req.on('error', reject);
+			req.end();
+		});
+	}
 
-    /**
-     * Purges an entire project's memory via the Rust Daemon
-     */
-    static async purgeProject(projectId: string): Promise<void> {
-        return new Promise((resolve, reject) => {
+	/**
+	 * Purges an entire project's memory via the Rust Daemon
+	 */
+	static async purgeProject(projectId: string): Promise<void> {
+		return new Promise((resolve, reject) => {
 			const requestPath = `${API_PREFIX}/memory/${projectId}`;
 			const options: http.RequestOptions = getRequestOptions('DELETE', requestPath);
-            const req = http.request(options, (res) => {
-                if (res.statusCode === 204) {
-                    resolve();
-                } else {
+			const req = http.request(options, (res) => {
+				if (res.statusCode === 204) {
+					resolve();
+				} else {
 					buildDaemonError(res, requestPath).then(reject, reject);
-                }
-            });
-            req.on('error', reject);
-            req.end();
-        });
-    }
+				}
+			});
+			req.on('error', reject);
+			req.end();
+		});
+	}
 
-    /**
-     * Deletes a single memory entry by ID via the Rust Daemon
-     */
-    static async deleteMemory(projectId: string, entryId: string): Promise<void> {
-        return new Promise((resolve, reject) => {
+	/**
+	 * Deletes a single memory entry by ID via the Rust Daemon
+	 */
+	static async deleteMemory(projectId: string, entryId: string): Promise<void> {
+		return new Promise((resolve, reject) => {
 			const requestPath = `${API_PREFIX}/memory/${projectId}/${encodeURIComponent(entryId)}`;
 			const options: http.RequestOptions = getRequestOptions('DELETE', requestPath);
-            const req = http.request(options, (res) => {
-                if (res.statusCode === 200) {
-                    resolve();
-                } else {
+			const req = http.request(options, (res) => {
+				if (res.statusCode === 200) {
+					resolve();
+				} else {
 					buildDaemonError(res, requestPath).then(reject, reject);
-                }
-            });
-            req.on('error', reject);
-            req.end();
-        });
-    }
+				}
+			});
+			req.on('error', reject);
+			req.end();
+		});
+	}
 
-    /**
-     * Upserts a single memory entry via the Rust Daemon over localhost HTTP
-     */
-    static async upsertMemory(projectId: string, entry: MemoryEntry): Promise<void> {
-        return new Promise((resolve, reject) => {
-            const data = JSON.stringify(entry);
+	/**
+	 * Upserts a single memory entry via the Rust Daemon over localhost HTTP
+	 */
+	static async upsertMemory(projectId: string, entry: MemoryEntry): Promise<void> {
+		return new Promise((resolve, reject) => {
+			const data = JSON.stringify(entry);
 			const requestPath = `${API_PREFIX}/memory/${projectId}`;
-            const options: http.RequestOptions = {
+			const options: http.RequestOptions = {
 				...getRequestOptions('POST', requestPath),
 				headers: {
 					'Content-Type': 'application/json',
 					'Content-Length': Buffer.byteLength(data)
 				}
 			};
-            const req = http.request(options, (res) => {
-                if (res.statusCode === 201 || res.statusCode === 200) {
-                    resolve();
-                } else {
+			const req = http.request(options, (res) => {
+				if (res.statusCode === 201 || res.statusCode === 200) {
+					resolve();
+				} else {
 					buildDaemonError(res, requestPath).then(reject, reject);
-                }
-            });
+				}
+			});
 
-            req.on('error', reject);
-            req.write(data);
-            req.end();
-        });
-    }
+			req.on('error', reject);
+			req.write(data);
+			req.end();
+		});
+	}
 
-    /**
-     * Searches memory semantically via the Rust Daemon
-     */
-    static async searchMemory(projectId: string, query: string): Promise<MemoryEntry[]> {
-        return new Promise((resolve, reject) => {
-            const encodedQuery = encodeURIComponent(query);
+	/**
+	 * Searches memory semantically via the Rust Daemon
+	 */
+	static async searchMemory(projectId: string, query: string): Promise<MemoryEntry[]> {
+		return new Promise((resolve, reject) => {
+			const encodedQuery = encodeURIComponent(query);
 			const requestPath = `${API_PREFIX}/memory/${projectId}/search?q=${encodedQuery}`;
 			const options = getRequestOptions('GET', requestPath);
-            const req = http.request(options, (res) => {
-                if (res.statusCode !== 200) {
+			const req = http.request(options, (res) => {
+				if (res.statusCode !== 200) {
 					buildDaemonError(res, requestPath).then(reject, reject);
 					return;
-                }
+				}
 
 				readResponseBody(res).then((data) => {
 					try {
@@ -662,11 +662,11 @@ export class MemoryClient {
 						reject(e);
 					}
 				}, reject);
-            });
-            req.on('error', reject);
-            req.end();
-        });
-    }
+			});
+			req.on('error', reject);
+			req.end();
+		});
+	}
 
 	/**
 	 * Link a memory to the newer memory that supersedes it
@@ -772,25 +772,25 @@ export class MemoryClient {
 		});
 	}
 
-    /**
-     * Generate rules files via the Rust Daemon
-     */
-    static async generateRules(
-        projectId: string,
-        redisUrl: string,
-        ide: string,
-        workspaceRoot: string
-    ): Promise<{ success: boolean; message: string }> {
-        return new Promise((resolve, reject) => {
-            const payload = JSON.stringify({
-                project_id: projectId,
-                redis_url: redisUrl,
-                ide: ide,
-                workspace_root: workspaceRoot
-            });
+	/**
+	 * Generate rules files via the Rust Daemon
+	 */
+	static async generateRules(
+		projectId: string,
+		redisUrl: string,
+		ide: string,
+		workspaceRoot: string
+	): Promise<{ success: boolean; message: string }> {
+		return new Promise((resolve, reject) => {
+			const payload = JSON.stringify({
+				project_id: projectId,
+				redis_url: redisUrl,
+				ide: ide,
+				workspace_root: workspaceRoot
+			});
 
 			const requestPath = `${API_PREFIX}/rules/generate`;
-            const options: http.RequestOptions = {
+			const options: http.RequestOptions = {
 				...getRequestOptions('POST', requestPath),
 				headers: {
 					'Content-Type': 'application/json',
@@ -798,7 +798,7 @@ export class MemoryClient {
 				}
 			};
 
-            const req = http.request(options, (res) => {
+			const req = http.request(options, (res) => {
 				readResponseBody(res).then((data) => {
 					if (res.statusCode !== 200) {
 						buildDaemonError(res, requestPath).then(reject, reject);
@@ -815,26 +815,26 @@ export class MemoryClient {
 						reject(e);
 					}
 				}, reject);
-            });
+			});
 
-            req.on('error', reject);
-            req.write(payload);
-            req.end();
-        });
-    }
+			req.on('error', reject);
+			req.write(payload);
+			req.end();
+		});
+	}
 
-    /**
-     * Get impact analysis for a file via the Rust Daemon
-     */
-    static async getImpact(file: string): Promise<any> {
-        return new Promise((resolve, reject) => {
+	/**
+	 * Get impact analysis for a file via the Rust Daemon
+	 */
+	static async getImpact(file: string): Promise<any> {
+		return new Promise((resolve, reject) => {
 			const requestPath = `${API_PREFIX}/autonomous/impact/${encodeURIComponent(file)}`;
 			const options = getRequestOptions('GET', requestPath);
-            const req = http.request(options, (res) => {
-                if (res.statusCode !== 200) {
+			const req = http.request(options, (res) => {
+				if (res.statusCode !== 200) {
 					buildDaemonError(res, requestPath).then(reject, reject);
 					return;
-                }
+				}
 				readResponseBody(res).then((data) => {
 					try {
 						resolve(JSON.parse(data));
@@ -842,11 +842,11 @@ export class MemoryClient {
 						reject(e);
 					}
 				}, reject);
-            });
-            req.on('error', reject);
-            req.end();
-        });
-    }
+			});
+			req.on('error', reject);
+			req.end();
+		});
+	}
 
 	/**
 	 * Fetch session timeline records from daemon flight recorder
@@ -1247,21 +1247,21 @@ export class MemoryClient {
 		});
 	}
 
-    /**
-     * Count tokens exactly via the Rust Daemon
-     */
-    static async countTokens(text: string): Promise<{ tokens: number; chars: number }> {
-        return new Promise((resolve, reject) => {
-            const payload = JSON.stringify({ text });
+	/**
+	 * Count tokens exactly via the Rust Daemon
+	 */
+	static async countTokens(text: string): Promise<{ tokens: number; chars: number }> {
+		return new Promise((resolve, reject) => {
+			const payload = JSON.stringify({ text });
 			const requestPath = `${API_PREFIX}/tokens/count`;
-            const options: http.RequestOptions = {
+			const options: http.RequestOptions = {
 				...getRequestOptions('POST', requestPath),
 				headers: {
 					'Content-Type': 'application/json',
 					'Content-Length': Buffer.byteLength(payload)
 				}
 			};
-            const req = http.request(options, (res) => {
+			const req = http.request(options, (res) => {
 				readResponseBody(res).then((data) => {
 					if (res.statusCode !== 200) {
 						buildDaemonError(res, requestPath).then(reject, reject);
@@ -1274,28 +1274,28 @@ export class MemoryClient {
 						reject(e);
 					}
 				}, reject);
-            });
-            req.on('error', reject);
-            req.write(payload);
-            req.end();
-        });
-    }
+			});
+			req.on('error', reject);
+			req.write(payload);
+			req.end();
+		});
+	}
 
-    /**
-     * Synchronize CRDT Team Brain via Rust Daemon
-     */
-    static async teamSync(projectId: string): Promise<{ success: boolean; message: string }> {
-        return new Promise((resolve, reject) => {
-            const payload = JSON.stringify({ project_id: projectId });
+	/**
+	 * Synchronize CRDT Team Brain via Rust Daemon
+	 */
+	static async teamSync(projectId: string): Promise<{ success: boolean; message: string }> {
+		return new Promise((resolve, reject) => {
+			const payload = JSON.stringify({ project_id: projectId });
 			const requestPath = `${API_PREFIX}/team/sync`;
-            const options: http.RequestOptions = {
+			const options: http.RequestOptions = {
 				...getRequestOptions('POST', requestPath),
 				headers: {
 					'Content-Type': 'application/json',
 					'Content-Length': Buffer.byteLength(payload)
 				}
 			};
-            const req = http.request(options, (res) => {
+			const req = http.request(options, (res) => {
 				readResponseBody(res).then((data) => {
 					if (res.statusCode !== 200) {
 						buildDaemonError(res, requestPath).then(reject, reject);
@@ -1312,12 +1312,12 @@ export class MemoryClient {
 						reject(e);
 					}
 				}, reject);
-            });
-            req.on('error', reject);
-            req.write(payload);
-            req.end();
-        });
-    }
+			});
+			req.on('error', reject);
+			req.write(payload);
+			req.end();
+		});
+	}
 
 	static async activateLicense(key: string, deviceId?: string): Promise<LicenseStatusResponse> {
 		return new Promise((resolve, reject) => {
@@ -1353,6 +1353,27 @@ export class MemoryClient {
 		return new Promise((resolve, reject) => {
 			const suffix = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : '';
 			const requestPath = `${API_PREFIX}/license/status${suffix}`;
+			const req = http.request(getRequestOptions('GET', requestPath), (res) => {
+				readResponseBody(res).then((data) => {
+					if ((res.statusCode ?? 500) >= 400) {
+						buildDaemonError(res, requestPath).then(reject, reject);
+						return;
+					}
+					try {
+						resolve(JSON.parse(data || '{}'));
+					} catch (e) {
+						reject(e);
+					}
+				}, reject);
+			});
+			req.on('error', reject);
+			req.end();
+		});
+	}
+
+	static async getPatternReport(): Promise<any> {
+		return new Promise((resolve, reject) => {
+			const requestPath = `${API_PREFIX}/observer/patterns`;
 			const req = http.request(getRequestOptions('GET', requestPath), (res) => {
 				readResponseBody(res).then((data) => {
 					if ((res.statusCode ?? 500) >= 400) {

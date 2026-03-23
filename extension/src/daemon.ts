@@ -164,7 +164,7 @@ export class DaemonManager {
     private static waitForHealthCheck(): Promise<{ status: string, message?: string }> {
         return new Promise((resolve, reject) => {
             let retries = 0;
-            const maxRetries = 30;
+            const maxRetries = 60;
             const healthPath = '/health';
 
             const requestOnce = () => {
@@ -201,12 +201,12 @@ export class DaemonManager {
                     const extra = err ? ` Last error: ${err.message}` : '';
                     reject(new Error(`Daemon failed to start or respond on ${this.socketPath}${healthPath}.${extra}`));
                 } else {
-                    setTimeout(requestOnce, 500);
+                    setTimeout(requestOnce, 1000);
                 }
             };
 
             // Start first check
-            setTimeout(requestOnce, 500);
+            setTimeout(requestOnce, 1000);
         });
     }
 
