@@ -754,7 +754,13 @@ async fn main() -> anyhow::Result<()> {
 		use std::os::unix::fs::PermissionsExt;
 		fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))?;
 		tracing::info!("Daemon listening on Unix Socket at {:?}", socket_path);
+		startup_ready.notify_waiters();
 	}
+
+	// Signals deferred startup tasks that the socket is bound and the daemon
+	// is accepting connections. Tasks wait on this rather than sleeping for
+	// an arbitrary duration — they start exactly when the daemon is ready.
+	let startup_ready = Arc::new(tokio::sync::Notify::new());
 
 	// ─── Run the Unix accept loop in a spawned task ────────────────────────────
 	// This means the health check can succeed immediately while the rest of
@@ -855,7 +861,7 @@ async fn main() -> anyhow::Result<()> {
 		let storage_for_migrations = storage_backend.clone();
 		tokio::spawn(async move {
 			// Give the daemon 2 seconds to finish starting before hitting Redis
-			tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+			startup_ready.clone().notified().await;
 			match tokio::time::timeout(
 				std::time::Duration::from_secs(10),
 				migrations::run_project_migrations(storage_for_migrations, &project_id),
@@ -878,7 +884,7 @@ async fn main() -> anyhow::Result<()> {
 		let data_dir_for_load = data_dir.clone();
 		let project_id_for_load = project_id_for_events.clone();
 		tokio::spawn(async move {
-			tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+			startup_ready.clone().notified().await;
 			match tokio::time::timeout(
 				std::time::Duration::from_secs(3),
 				crate::token::tracker::TokenTracker::load_lifetime_into(
@@ -902,7 +908,7 @@ async fn main() -> anyhow::Result<()> {
 		let data_dir_for_emb = data_dir.clone();
 		let project_id_for_emb = project_id_for_events.clone();
 		tokio::spawn(async move {
-			tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+			startup_ready.clone().notified().await;
 			if let Err(e) = tokio::time::timeout(
 				std::time::Duration::from_secs(5),
 				crate::observer::embedding_store::EmbeddingStore::load_into(
@@ -927,7 +933,7 @@ async fn main() -> anyhow::Result<()> {
 			token_tracker.clone(),
 		);
 		tokio::spawn(async move {
-			tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+			startup_ready.clone().notified().await;
 			indexer.run_if_needed().await;
 		});
 	}

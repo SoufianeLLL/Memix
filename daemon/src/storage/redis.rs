@@ -217,8 +217,8 @@ impl RedisStorage {
 		}
 	}
 
-	fn embedding_model() -> anyhow::Result<&'static std::sync::Mutex<TextEmbedding>> {
-		static MODEL: OnceCell<std::sync::Mutex<TextEmbedding>> = OnceCell::new();
+	fn embedding_model() -> anyhow::Result<&'static parking_lot::Mutex<TextEmbedding>> {
+		static MODEL: OnceCell<parking_lot::Mutex<TextEmbedding>> = OnceCell::new();
 		if let Some(model) = MODEL.get() {
 			return Ok(model);
 		}
@@ -229,7 +229,7 @@ impl RedisStorage {
 		)
 		.map_err(|e| anyhow::anyhow!("fastembed init failed: {}", e))?;
 
-		let _ = MODEL.set(std::sync::Mutex::new(model));
+		let _ = MODEL.set(parking_lot::Mutex::new(model));
 		MODEL
 			.get()
 			.ok_or_else(|| anyhow::anyhow!("fastembed model initialization did not persist"))
@@ -245,7 +245,7 @@ impl RedisStorage {
 	async fn embed_text_real(text: String) -> anyhow::Result<Vec<f32>> {
 		let handle = tokio::task::spawn_blocking(move || {
 			let model_mutex = Self::embedding_model()?;
-            let mut model = model_mutex.lock().unwrap();
+            let mut model = model_mutex.lock();
 			let out = model
 				.embed(vec![text], None)
 				.map_err(|e| anyhow::anyhow!("fastembed embed failed: {}", e))?;
@@ -650,6 +650,12 @@ impl StorageBackend for RedisStorage {
 	}
 
 	async fn delete_entry(&self, project_id: &str, entry_id: &str) -> Result<()> {
+		// Invalidate cache so the deletion is visible immediately on next read.
+		{
+			let mut cache = self.entry_cache.write().await;
+			cache.remove(project_id);
+		}
+
 		let mut conn = self.get_conn().await?;
 		let _: () = conn.hdel(project_id, entry_id).await?;
 		self.delete_entry_json_at(entry_id).await;
