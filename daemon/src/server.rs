@@ -30,6 +30,7 @@ use crate::observer::differ::SemanticDiff;
 use crate::observer::call_graph::{CallGraph, FileCausalContext};
 use crate::observer::dna::ProjectCodeDna;
 use crate::observer::graph::DependencyGraph;
+use crate::observer::patterns::PatternEngine;
 use crate::observer::importance::{compute_importance, compute_blast_radius};
 use crate::recorder::flight::{FlightRecorder, FlightRecord};
 
@@ -135,6 +136,36 @@ fn classify_storage_error(msg: &str) -> StatusCode {
         StatusCode::SERVICE_UNAVAILABLE
     } else {
         StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
+pub async fn get_patterns(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    // workspace_root must be set — patterns analysis requires a directory to walk.
+    // Return a clean empty report rather than crashing if the daemon has no workspace.
+    let Some(root) = state.workspace_root.as_deref() else {
+        return Json(serde_json::json!({
+            "patterns": [],
+            "total_files_scanned": 0,
+            "total_functions_analyzed": 0,
+            "scan_duration_ms": 0
+        })).into_response();
+    };
+
+    // PatternEngine::analyze is CPU-heavy (walks the entire workspace + parses every file).
+    // Wrap it in spawn_blocking so it never stalls the async executor.
+    let root_path = std::path::PathBuf::from(root);
+    let report = tokio::task::spawn_blocking(move || {
+        PatternEngine::new(3).analyze(&root_path)
+    }).await;
+
+    match report {
+        Ok(r) => Json(serde_json::to_value(r).unwrap_or_default()).into_response(),
+        Err(e) => {
+            tracing::error!("Pattern scan task failed: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Pattern scan failed").into_response()
+        }
     }
 }
 
@@ -403,6 +434,9 @@ pub fn build_router(
         .route("/api/v1/tokens/stats", get(get_token_stats))
         .route("/api/v1/tokens/record", post(record_ai_token_use))
 
+		// Observer patterns
+		.route("/observer/patterns", get(get_patterns))
+
         .with_state(shared_state)
 }
 
@@ -589,45 +623,45 @@ async fn control_status(State(state): State<Arc<AppState>>) -> impl IntoResponse
     (StatusCode::OK, Json(serde_json::json!({"config": config, "config_path": path.to_string_lossy()}))).into_response()
 }
 
- async fn initiate_license(
-     State(state): State<Arc<AppState>>,
-     Json(req): Json<InitiateLicenseRequest>,
- ) -> impl IntoResponse {
-     match proxy_license_post::<_, LicenseInitiateResult>(&state, "/v1/license/initiate", &serde_json::json!({ "email": req.email })).await {
-         Ok(result) => (StatusCode::OK, Json(result)).into_response(),
-         Err((status, body)) => (status, body).into_response(),
-     }
- }
+async fn initiate_license(
+	State(state): State<Arc<AppState>>,
+	Json(req): Json<InitiateLicenseRequest>,
+) -> impl IntoResponse {
+	match proxy_license_post::<_, LicenseInitiateResult>(&state, "/v1/license/initiate", &serde_json::json!({ "email": req.email })).await {
+		Ok(result) => (StatusCode::OK, Json(result)).into_response(),
+		Err((status, body)) => (status, body).into_response(),
+	}
+}
 
- async fn get_pending_license(
-     State(state): State<Arc<AppState>>,
-     Path(token): Path<String>,
- ) -> impl IntoResponse {
-     let path = format!("/v1/license/pending/{}", token);
-     match proxy_license_get::<LicensePendingResult>(&state, &path).await {
-         Ok(result) => (StatusCode::OK, Json(result)).into_response(),
-         Err((status, body)) => (status, body).into_response(),
-     }
- }
+async fn get_pending_license(
+	State(state): State<Arc<AppState>>,
+	Path(token): Path<String>,
+) -> impl IntoResponse {
+	let path = format!("/v1/license/pending/{}", token);
+	match proxy_license_get::<LicensePendingResult>(&state, &path).await {
+		Ok(result) => (StatusCode::OK, Json(result)).into_response(),
+		Err((status, body)) => (status, body).into_response(),
+	}
+}
 
- async fn activate_license(
-     State(state): State<Arc<AppState>>,
-     Json(req): Json<ActivateLicenseRequest>,
- ) -> impl IntoResponse {
-     match state.license_validator.activate(&req.key, req.device_id.as_deref()).await {
-         Ok(status) => {
-             let mut config = state.config.write().await;
-             config.license_key = Some(req.key);
-             config.save(state.workspace_root.as_deref());
-             (StatusCode::OK, Json(status)).into_response()
-         }
-         Err(err) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-             "available": state.license_validator.is_available(),
-             "active": false,
-             "message": err.to_string()
-         }))).into_response()
-     }
- }
+async fn activate_license(
+	State(state): State<Arc<AppState>>,
+	Json(req): Json<ActivateLicenseRequest>,
+) -> impl IntoResponse {
+	match state.license_validator.activate(&req.key, req.device_id.as_deref()).await {
+		Ok(status) => {
+			let mut config = state.config.write().await;
+			config.license_key = Some(req.key);
+			config.save(state.workspace_root.as_deref());
+			(StatusCode::OK, Json(status)).into_response()
+		}
+		Err(err) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({
+			"available": state.license_validator.is_available(),
+			"active": false,
+			"message": err.to_string()
+		}))).into_response()
+	}
+}
 
 async fn skeleton_stats(
 	State(state): State<Arc<AppState>>,
@@ -744,19 +778,19 @@ fn render_causal_context(context: &FileCausalContext) -> Option<String> {
 	Some(lines.join("\n"))
 }
 
- async fn get_license_status(
-     State(state): State<Arc<AppState>>,
-     Query(query): Query<LicenseStatusQuery>,
- ) -> impl IntoResponse {
-     let config = state.config.read().await.clone();
-     let status = state
+async fn get_license_status(
+	State(state): State<Arc<AppState>>,
+	Query(query): Query<LicenseStatusQuery>,
+) -> impl IntoResponse {
+	let config = state.config.read().await.clone();
+	let status = state
          .license_validator
          .status_for_key(config.license_key.as_deref(), query.device_id.as_deref())
          .await;
-     (StatusCode::OK, Json(status)).into_response()
- }
+    (StatusCode::OK, Json(status)).into_response()
+}
 
- async fn proxy_license_get<T: serde::de::DeserializeOwned>(state: &Arc<AppState>, path: &str) -> Result<T, (StatusCode, String)> {
+async fn proxy_license_get<T: serde::de::DeserializeOwned>(state: &Arc<AppState>, path: &str) -> Result<T, (StatusCode, String)> {
     let base_url = match state.license_validator.server_base_url() {
         Some(value) => value,
         None => return Err((StatusCode::PRECONDITION_FAILED, "MEMIX_LICENSE_SERVER_URL is not configured".to_string())),
@@ -767,37 +801,37 @@ fn render_causal_context(context: &FileCausalContext) -> Option<String> {
         .send()
         .await
         .map_err(|err| (StatusCode::BAD_GATEWAY, err.to_string()))?;
-     let status = StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-     let body = response.text().await.map_err(|err| (StatusCode::BAD_GATEWAY, err.to_string()))?;
-     if !status.is_success() {
-         return Err((status, body));
-     }
-     serde_json::from_str(&body).map_err(|err| (StatusCode::BAD_GATEWAY, err.to_string()))
- }
+	let status = StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+	let body = response.text().await.map_err(|err| (StatusCode::BAD_GATEWAY, err.to_string()))?;
+	if !status.is_success() {
+		return Err((status, body));
+	}
+	serde_json::from_str(&body).map_err(|err| (StatusCode::BAD_GATEWAY, err.to_string()))
+}
 
- async fn proxy_license_post<B: serde::Serialize, T: serde::de::DeserializeOwned>(
-     state: &Arc<AppState>,
-     path: &str,
-     body: &B,
- ) -> Result<T, (StatusCode, String)> {
-    let base_url = match state.license_validator.server_base_url() {
-        Some(value) => value,
-        None => return Err((StatusCode::PRECONDITION_FAILED, "MEMIX_LICENSE_SERVER_URL is not configured".to_string())),
-    };
-    let url = format!("{}{}", base_url, path);
+async fn proxy_license_post<B: serde::Serialize, T: serde::de::DeserializeOwned>(
+	state: &Arc<AppState>,
+	path: &str,
+	body: &B,
+) -> Result<T, (StatusCode, String)> {
+	let base_url = match state.license_validator.server_base_url() {
+		Some(value) => value,
+		None => return Err((StatusCode::PRECONDITION_FAILED, "MEMIX_LICENSE_SERVER_URL is not configured".to_string())),
+	};
+	let url = format!("{}{}", base_url, path);
     let response = state.license_validator.http_client()
         .post(url)
         .json(body)
         .send()
         .await
         .map_err(|err| (StatusCode::BAD_GATEWAY, err.to_string()))?;
-     let status = StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-     let text = response.text().await.map_err(|err| (StatusCode::BAD_GATEWAY, err.to_string()))?;
-     if !status.is_success() {
-         return Err((status, text));
-     }
-     serde_json::from_str(&text).map_err(|err| (StatusCode::BAD_GATEWAY, err.to_string()))
- }
+	let status = StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+	let text = response.text().await.map_err(|err| (StatusCode::BAD_GATEWAY, err.to_string()))?;
+	if !status.is_success() {
+		return Err((status, text));
+	}
+	serde_json::from_str(&text).map_err(|err| (StatusCode::BAD_GATEWAY, err.to_string()))
+}
 
 /// Get memory for a specific project
 async fn get_memory(
@@ -1118,7 +1152,7 @@ async fn purge_project(
 async fn daemon_status() -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "status": "healthy",
-        "version": "0.2.3-beta",
+        "version": "0.3.0-beta",
         "features": [
             "autonomous_watching",
             "semantic_diff",

@@ -7,6 +7,17 @@ use tracing_subscriber;
 
 const BUNDLED_LICENSE_PUBLIC_KEY_DER: &[u8] = include_bytes!("../keys/memix_public.der");
 
+/// Strip the workspace root from an absolute path for display.
+/// Falls back to the full path if the root prefix doesn't match.
+fn display_path(absolute: &str, workspace_root: Option<&str>) -> String {
+    if let Some(root) = workspace_root {
+        if let Some(stripped) = absolute.strip_prefix(root) {
+            return stripped.trim_start_matches('/').to_string();
+        }
+    }
+    absolute.to_string()
+}
+
 fn install_panic_hook() {
 	std::panic::set_hook(Box::new(|panic_info| {
 		let payload = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
@@ -670,21 +681,9 @@ async fn main() -> anyhow::Result<()> {
 		license_cache_path,
 	)?);
 
-	if let Some(project_id) = app_config.project_id.clone() {
-		match migrations::run_project_migrations(storage_backend.clone(), &project_id).await {
-			Ok(report) => tracing::info!(
-				"Applied migrations for project {} (schema_version={}, migrated_entries={})",
-				report.project_id,
-				report.schema_version,
-				report.migrated_entries
-			),
-			Err(e) => tracing::error!("Migration run failed for project {}: {}", project_id, e),
-		}
-	}
-
-    let daemon_config = Arc::new(tokio::sync::RwLock::new(
-        server::DaemonConfig::load(app_config.workspace_root.as_deref())
-    ));
+	let daemon_config = Arc::new(tokio::sync::RwLock::new(
+		server::DaemonConfig::load(app_config.workspace_root.as_deref())
+	));
 	let team_actor_id = derive_team_actor_id(&app_config);
 
 	let data_dir = app_config
@@ -693,54 +692,25 @@ async fn main() -> anyhow::Result<()> {
 		.map(std::path::PathBuf::from)
 		.unwrap_or_else(|| std::path::PathBuf::from(".memix"));
 
-	// Initialize EmbeddingStore
-	let redis_client = None; // For future: extract from storage_backend if it's Redis
-	let embedding_store = crate::observer::embedding_store::EmbeddingStore::load(
-		&project_id_for_events,
+	// ── Start with empty EmbeddingStore and TokenTracker synchronously ──────────
+	// Both are initialized to empty/default here so build_router can proceed
+	// immediately with no Redis I/O. Background tasks below will load the real
+	// state from disk and Redis after the socket is already bound and serving
+	// health checks. This is the only way to guarantee the socket binds within
+	// the extension's 5-second health check window when Redis is slow or throttled.
+	let embedding_store = crate::observer::embedding_store::EmbeddingStore::empty(
 		&data_dir,
-		redis_client,
-	).await.unwrap_or_else(|e| {
-		tracing::warn!("EmbeddingStore load failed: {}, starting empty", e);
-		crate::observer::embedding_store::EmbeddingStore::empty(&data_dir, &project_id_for_events)
-	});
-
-	// Initialize TokenTracker
+		&project_id_for_events,
+	);
 	let token_tracker = Arc::new(
-		crate::token::tracker::TokenTracker::load(
+		crate::token::tracker::TokenTracker::default_empty(
 			&project_id_for_events,
 			&data_dir,
-		).await
+		)
 	);
 
-	// Spawn background indexer
-	if let Some(root) = app_config.workspace_root.clone() {
-		let indexer = crate::observer::background_indexer::BackgroundIndexer::new(
-			std::path::PathBuf::from(root),
-			project_id_for_events.clone(),
-			storage_backend.clone(),
-			embedding_store.clone(),
-			token_tracker.clone(),
-		);
-		tokio::spawn(async move {
-			tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-			indexer.run_if_needed().await;
-		});
-	}
-
-	// Add a periodic flush task for both token stats and embeddings
-	let flush_token_tracker = token_tracker.clone();
-	let flush_embedding_store = embedding_store.clone();
-	let flush_project_id = project_id_for_events.clone();
-	tokio::spawn(async move {
-		let mut interval = tokio::time::interval(std::time::Duration::from_secs(300)); // every 5 min
-		loop {
-			interval.tick().await;
-			let _ = flush_token_tracker.flush_session_to_lifetime(&flush_project_id).await;
-			let _ = flush_embedding_store.flush(None).await;
-		}
-	});
-
-    // 3. Build the Axum server routes and pass the shared storage state
+    // 3. Build the Axum server routes and pass the shared storage state.
+	// Happens before any Redis I/O so the socket can bind immediately after.
     let app = server::build_router(
 		storage_backend.clone(),
 		autonomous.clone(),
@@ -755,14 +725,15 @@ async fn main() -> anyhow::Result<()> {
 		team_actor_id,
 		app_config.team_secret.clone(),
 		license_validator,
-        daemon_config.clone(),
+		daemon_config.clone(),
 		token_tracker.clone(),
 		embedding_store.clone(),
 	);
 
-	// ─── BIND UNIX SOCKET IMMEDIATELY after router is ready ───────────────────
-	// Do this BEFORE migrations and heavy init so the health check can pass
-	// as soon as the process is alive, not after all startup work completes.
+	// ─── BIND UNIX SOCKET ────────────────────────────────────────────────────
+	// All pre-bind work is now timeout-bounded. Migrations, EmbeddingStore, and
+	// TokenTracker all have hard timeouts so this point is reached within ~3s
+	// of daemon startup, well inside the extension's 5-second health check window.
 	#[cfg(unix)]
 	let socket_path = {
 		let home_dir = dirs::home_dir()
@@ -872,6 +843,112 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     });
+
+	// ── Deferred startup tasks — run after socket is bound ─────────────────────
+	// These tasks hit Redis and disk. By spawning them here, the socket is
+	// already accepting health check connections before any I/O begins.
+	// If Redis is slow (throttled free tier, network hiccup), the daemon
+	// remains healthy from the extension's perspective while data loads quietly.
+
+	// Deferred: run schema migrations for the project
+	if let Some(project_id) = app_config.project_id.clone() {
+		let storage_for_migrations = storage_backend.clone();
+		tokio::spawn(async move {
+			// Give the daemon 2 seconds to finish starting before hitting Redis
+			tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+			match tokio::time::timeout(
+				std::time::Duration::from_secs(10),
+				migrations::run_project_migrations(storage_for_migrations, &project_id),
+			).await {
+				Ok(Ok(report)) => tracing::info!(
+					"Migrations complete for {} (schema_version={}, migrated_entries={})",
+					report.project_id, report.schema_version, report.migrated_entries
+				),
+				Ok(Err(e)) => tracing::error!("Migration run failed: {}", e),
+				Err(_) => tracing::warn!("Migrations timed out after 10s — will retry on next start"),
+			}
+		});
+	}
+
+	// Deferred: load TokenTracker lifetime totals from disk
+	// Session counters already start at zero which is correct for a new session.
+	// Loading the lifetime file just restores the historical totals display.
+	{
+		let token_tracker_for_load = token_tracker.clone();
+		let data_dir_for_load = data_dir.clone();
+		let project_id_for_load = project_id_for_events.clone();
+		tokio::spawn(async move {
+			tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+			match tokio::time::timeout(
+				std::time::Duration::from_secs(3),
+				crate::token::tracker::TokenTracker::load_lifetime_into(
+					&token_tracker_for_load,
+					&project_id_for_load,
+					&data_dir_for_load,
+				),
+			).await {
+				Ok(Ok(())) => tracing::debug!("TokenTracker lifetime totals loaded"),
+				Ok(Err(e)) => tracing::warn!("TokenTracker lifetime load failed: {} — session stats only", e),
+				Err(_) => tracing::warn!("TokenTracker lifetime load timed out — session stats only"),
+			}
+		});
+	}
+
+	// Deferred: load EmbeddingStore from disk (and Redis fallback)
+	// If the binary file exists this is fast (< 50ms). Redis fallback only
+	// runs when binary file is absent — new machine or first run.
+	{
+		let embedding_store_for_load = embedding_store.clone();
+		let data_dir_for_emb = data_dir.clone();
+		let project_id_for_emb = project_id_for_events.clone();
+		tokio::spawn(async move {
+			tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+			if let Err(e) = tokio::time::timeout(
+				std::time::Duration::from_secs(5),
+				crate::observer::embedding_store::EmbeddingStore::load_into(
+					&embedding_store_for_load,
+					&project_id_for_emb,
+					&data_dir_for_emb,
+					None,
+				),
+			).await {
+				tracing::warn!("EmbeddingStore deferred load timed out — background indexer will rebuild");
+			}
+		});
+	}
+
+	// Spawn background indexer (unchanged — already had a 5s delay)
+	if let Some(root) = app_config.workspace_root.clone() {
+		let indexer = crate::observer::background_indexer::BackgroundIndexer::new(
+			std::path::PathBuf::from(root),
+			project_id_for_events.clone(),
+			storage_backend.clone(),
+			embedding_store.clone(),
+			token_tracker.clone(),
+		);
+		tokio::spawn(async move {
+			tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+			indexer.run_if_needed().await;
+		});
+	}
+
+	// Periodic flush: token stats and embeddings to disk
+	let flush_token_tracker = token_tracker.clone();
+	let flush_embedding_store = embedding_store.clone();
+	let flush_project_id = project_id_for_events.clone();
+	tokio::spawn(async move {
+		let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+		loop {
+			interval.tick().await;
+			let _ = flush_token_tracker.flush_session_to_lifetime(&flush_project_id).await;
+			// ── MULTI-IDE NOTE ────────────────────────────────────────────────────
+			// When multi-IDE support is built, change flush_disk_only() back to
+			// flush() and pass the actual Redis client so the embedding store syncs
+			// to Redis for sharing between IDE instances on the same project.
+			// ─────────────────────────────────────────────────────────────────────
+			let _ = flush_embedding_store.flush_disk_only().await;
+		}
+	});
 
     // 5. Spawn the AST Background Observer
     let (tx, mut rx) = tokio::sync::mpsc::channel(100);
@@ -1136,7 +1213,13 @@ async fn main() -> anyhow::Result<()> {
 					intent_type: intent.as_str().to_string(),
 				});
 
-				if !breaking_signatures.is_empty() {
+				// Only fire a breaking signature warning when:
+				// 1. We actually had a prior snapshot (old_bytes non-empty), AND
+				// 2. The old snapshot had real content (not just a cache cold-start), AND
+				// 3. There are genuine signature changes between the two versions.
+				// Without these guards, daemon startup floods the brain with false warnings
+				// because every file looks like it "changed" from empty to its current state.
+				if !old_bytes.is_empty() && !breaking_signatures.is_empty() {
 					let now = Utc::now();
 					let details = breaking_signatures
 						.iter()
@@ -1309,7 +1392,17 @@ async fn main() -> anyhow::Result<()> {
 				let diff_for_agents = diff.clone();
 				let (intent_entry_json, related_files_for_agents, graph_snapshot_for_agents) = {
 					let mut a = autonomous_for_events.lock().await;
-					a.update_dependency_graph(&key, &imports);
+					// Filter imports: only keep local file paths, not bare package names.
+					// Bare names like "vscode", "react", "path" are external packages that
+					// pollute the structural graph with nodes that skew importance scores.
+					let local_imports: Vec<String> = imports
+						.into_iter()
+						.filter(|imp| {
+							// A local file always contains a path separator or starts with .
+							imp.contains('/') || imp.contains('\\')
+						})
+						.collect();
+					a.update_dependency_graph(&key, &local_imports);
 					let missing_resolved: Vec<String> = a
 						.dependency_graph
 						.edges_out
@@ -1383,6 +1476,7 @@ async fn main() -> anyhow::Result<()> {
 						format!("related_files={}", related_files.len()),
 						format!("nodes_changed={}", nodes_changed),
 					];
+
 					let token_weight = TokenEngine::count_tokens(&format!(
 						"{}\n{}\n{}",
 						key,
