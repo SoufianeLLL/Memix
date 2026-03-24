@@ -8,6 +8,16 @@ Here's the markdown to add at the top of your changelog entries, above whatever 
 
 ---
 
+## [1.1.0-beta] (Daemon: 0.4.0-beta) — 2026-03-24
+### Added
+- **Proactive Risk UI:** Completely redesigned the Proactive Risk dashboard to parse raw warning signatures into clean bullet points with a "Open explanation" modal displaying the diff changes.
+- **Skeleton Cache:** Added a 60-second in-memory locking TTL cache to the Redis storage backend. This safely eliminates hundreds of redundant `HVALS` calls hitting the Redis database when the UI polls for skeleton structures.
+- **Accurate Size Accreation:** Added `size_bytes` calculation directly into the Rust daemon `/api/v1/skeleton/stats` endpoint. `Memix Size` now aggregates the size of `memix-project_skeletons` locally and accurately files them under the *Semantic* Memory Category.
+
+### Fixed
+- **UI Polling Spikes:** Dropped the background advanced data polling span inside `debug-panel.ts` from 5 seconds to 15 seconds to drastically lower CPU footprints.
+- **Background Flusher Lifetimes:** Consolidated the warning signature cleanup loop directly into the 5-minute telemetry token flush worker. This fixes a double-borrow allocation error and centralizes the `tokio::spawn` intervals perfectly into one unit.
+
 ## [1.0.11-beta] (Daemon: 0.3.2-beta) — 2026-03-23
 ### Added
 - **Brain Sleep Check:** Added handling during `initBrain()` to detect if the daemon is currently paused; if so, it temporarily resumes processing, performs initialization, and restores the paused state.
