@@ -165,6 +165,40 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 						}
 					}
 					break;
+				case 'openWarningDetail': {
+					const content = typeof msg.content === 'string' ? msg.content : '';
+					const file = typeof msg.file === 'string' ? msg.file : '';
+
+					// Try to open the actual file in the editor first.
+					// If the file doesn't exist (warning about a deleted file), fall back
+					// to the centered payload view which always works regardless.
+					let opened = false;
+					if (file) {
+						try {
+							const uri = vscode.Uri.file(file);
+							await vscode.window.showTextDocument(uri, { preview: true });
+							opened = true;
+						} catch {
+							// File doesn't exist or isn't accessible — fall through to modal
+						}
+					}
+
+					if (!opened) {
+						// Format the content for human reading before showing in the modal.
+						// The raw string has dashes and arrows that read better line-by-line.
+						const formatted = content
+							.split('\n')
+							.map((line: string) => line.replace(/^- /, '  • ').replace(' -> ', '\n      → '))
+							.join('\n');
+						await this.openCenteredPayloadView(
+							'Signature Change Explanation',
+							formatted,
+							file || 'Unknown file',
+							'The daemon detected these changes between the previous and current AST snapshot.'
+						);
+					}
+					break;
+				}
 				case 'scanPatterns':
 					await this.runPanelCommand('Scanning patterns...', async () => {
 						await this.sendPatternUpdate();
@@ -363,10 +397,25 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 					try {
 						const path = require('path');
 						const fs = require('fs');
-						// Try multiple possible locations for versions.json
+
+						let daemonVer = 'unknown';
+						let extensionVer = 'unknown';
+						let lastModified = '';
+
+						// Try to get dynamic daemon version from the running process
+						try {
+							const healthResp = await DaemonManager.ping();
+							if (healthResp && (healthResp as any).version) {
+								daemonVer = (healthResp as any).version;
+							}
+						} catch (e) {
+							console.warn('Failed to ping daemon for version:', e);
+						}
+
+						// Try multiple possible locations for versions.json for extension version and modified date
 						const possiblePaths = [
-							path.join(this.extensionUri.fsPath, '..', 'versions.json'),
 							path.join(this.extensionUri.fsPath, 'versions.json'),
+							path.join(this.extensionUri.fsPath, '..', 'versions.json'),
 							path.join(this.extensionUri.fsPath, '..', '..', 'versions.json'),
 						];
 						let versionsPath: string | null = null;
@@ -376,14 +425,13 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 								break;
 							}
 						}
-						let daemonVer = 'unknown';
-						let extensionVer = 'unknown';
-						let lastModified = '';
+
 						if (versionsPath) {
 							try {
 								const raw = fs.readFileSync(versionsPath, 'utf8');
 								const v = JSON.parse(raw);
-								daemonVer = v.daemonVersion || 'unknown';
+								daemonVer = JSON.stringify(v);
+								// if (daemonVer === 'unknown') daemonVer = v.daemonVersion || 'unknown';
 								extensionVer = v.extensionVersion || 'unknown';
 								const stat = fs.statSync(versionsPath);
 								const diffMs = Date.now() - new Date(stat.mtime).getTime();
@@ -399,12 +447,21 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 						} else {
 							console.warn('versions.json not found in any expected location');
 						}
+
 						// Fallback: try package.json for extension version
 						if (extensionVer === 'unknown') {
 							try {
 								const pkgPath = path.join(this.extensionUri.fsPath, 'package.json');
-								const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-								extensionVer = pkg.version || 'unknown';
+								if (fs.existsSync(pkgPath)) {
+									const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+									extensionVer = pkg.version || 'unknown';
+								} else {
+									const parentPkgPath = path.join(this.extensionUri.fsPath, '..', 'package.json');
+									if (fs.existsSync(parentPkgPath)) {
+										const pkg = JSON.parse(fs.readFileSync(parentPkgPath, 'utf8'));
+										extensionVer = pkg.version || 'unknown';
+									}
+								}
 							} catch { /* ignore */ }
 						}
 						const detail = `Daemon: v${daemonVer}\nExtension: v${extensionVer}${lastModified ? `\nLast updated: ${lastModified}` : ''}`;
@@ -538,6 +595,16 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				keys[k] = size;
 				totalBytes += size;
 			}
+
+			// Fetch skeleton stats to include in total size estimation
+			if (projectId) {
+				const skeletonStats = await MemoryClient.getSkeletonStats(projectId);
+				if (skeletonStats && typeof skeletonStats.size_bytes === 'number' && skeletonStats.size_bytes > 0) {
+					keys['memix-project_skeletons'] = skeletonStats.size_bytes;
+					totalBytes += skeletonStats.size_bytes;
+				}
+			}
+
 			const sizeInfo = { totalBytes, keys };
 			const healthReport = this.health!.runFullCheckFromSnapshot(allData);
 

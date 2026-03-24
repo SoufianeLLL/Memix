@@ -1,5 +1,14 @@
 document.addEventListener('click', function(e) {
     var target = e.target;
+    if (target && target.classList && target.classList.contains('warn-open-detail')) {
+        e.preventDefault();
+        vscode.postMessage({
+            command: 'openWarningDetail',
+            content: target.getAttribute('data-content') || '',
+            file:    target.getAttribute('data-file') || ''
+        });
+        return;
+    }
     while (target && target !== document.body) {
         if (target.classList && target.classList.contains('brain-key-link')) {
             e.preventDefault();
@@ -10,6 +19,7 @@ document.addEventListener('click', function(e) {
         target = target.parentNode;
     }
 });
+
 
 window.onerror = function(msg, src, ln, col, err) {
 	document.body.innerHTML = '<div style="color:red;padding:20px;font-size:14px;background:transparent;border:1px solid red"><b>FATAL WEBVIEW ERROR:</b><br/>' + escapeHtml(msg) + '<br/>Line: ' + escapeHtml(ln) + '</div>';
@@ -41,6 +51,62 @@ function escapeHtml(value) {
 		.replace(/>/g, '&gt;')
 		.replace(/"/g, '&quot;')
 		.replace(/'/g, '&#39;');
+}
+
+// Parses a warning entry content string into its constituent parts.
+// Warning strings have a consistent format produced by the daemon's
+// signature detection code: a header sentence followed by bullet lines.
+// Returns { file, shortFile, changes } for clean UI rendering.
+function parseWarningContent(content) {
+    if (!content || typeof content !== 'string') {
+        return { file: '', shortFile: '', changes: [] };
+    }
+
+    // The first line is always "Potential breaking ... detected in {path}:"
+    // Everything after the first newline is the change list.
+    var colonIdx = content.indexOf(':\n');
+    var header = colonIdx >= 0 ? content.slice(0, colonIdx) : content;
+    var body   = colonIdx >= 0 ? content.slice(colonIdx + 2) : '';
+
+    // Extract the file path from the header — it's the last token after "in "
+    var inIdx = header.lastIndexOf(' in ');
+    var file  = inIdx >= 0 ? header.slice(inIdx + 4).trim() : '';
+    var shortFile = stripRoot(file) || file;
+
+    // Each change line starts with "- "
+    var changes = body
+        .split('\n')
+        .map(function(l) { return l.replace(/^- /, '').trim(); })
+        .filter(function(l) { return l.length > 0; });
+
+    return { file: file, shortFile: shortFile, changes: changes };
+}
+
+// Builds the compact summary line shown in the panel.
+// Full detail is revealed in a modal on click, not inline.
+function renderWarningCompact(content, onOpenDetail) {
+    var parsed = parseWarningContent(content);
+    if (!parsed.file) {
+        // Fallback for non-signature warnings with unknown format
+        return '<div style="font-size:11px">' + escapeHtml(content.slice(0, 120)) +
+               (content.length > 120 ? '…' : '') + '</div>';
+    }
+
+    var changeCount = parsed.changes.length;
+    var summary = changeCount === 1
+        ? '1 signature change'
+        : changeCount + ' signature changes';
+
+    // The button posts a message to the extension host which can open a file
+    // or the centered payload view — the webview cannot open files directly.
+    return '<div style="font-size:11px;margin:2px 0">' +
+        '<span style="opacity:0.7">⚠ </span>' +
+        '<span>' + escapeHtml(parsed.shortFile) + '</span>' +
+        ' <span style="opacity:0.5">— ' + summary + '</span>' +
+        ' <button class="warn-open-detail action-btn" style="font-size:10px;padding:1px 6px;margin-left:6px"' +
+        ' data-content="' + escapeHtml(content) +
+        '" data-file="' + escapeHtml(parsed.file) + '">Open explanation</button>' +
+        '</div>';
 }
 
 function showLoading(text) {
@@ -123,7 +189,8 @@ function send(cmd, opts, payload) {
 		'teamSync': 'Initiating team sync...',
 		'prune': 'Pruning stale data...',
 		'recoverBrain': 'Recovering brain...',
-		'clearBrain': 'Clearing brain...'
+		'clearBrain': 'Clearing brain...',
+		'scanPatterns': 'Scanning codebase patterns...'
 	};
 	if (opts.showSpinner && msgs[cmd]) showLoading(msgs[cmd]);
 	var message = Object.assign({ command: cmd }, payload || {});
@@ -493,7 +560,7 @@ if (document.readyState === 'loading') {
 var btnScanPatterns = byId('btn-scan-patterns');
 if (btnScanPatterns) {
 	btnScanPatterns.addEventListener('click', function () {
-		send('scanPatterns', { showSpinner: false });
+		send('scanPatterns', { showSpinner: true });
 	});
 }
 
@@ -572,7 +639,7 @@ window.addEventListener('message', function (e) {
 		var configInfo = byId('settings-config-info');
 		var configPathEl = byId('settings-config-path');
 		if (configPathEl) {
-			configPathEl.textContent = configPath ? configPath : '—';
+			configPathEl.textContent = escapeHtml(configPath) ? escapeHtml(stripRoot(configPath)) : '—';
 		}
 		if (spinnerActive) hideLoading();
 		return;
@@ -757,7 +824,7 @@ window.addEventListener('message', function (e) {
 			if (tss) tss.textContent = (session.estimated_tokens_saved || 0).toLocaleString();
 			
 			var tsf = byId('token-session-files');
-			if (tsf) tsf.textContent = (session.files_indexed || 0).toLocaleString();
+			if (tsf) tsf.textContent = (session.files_skeleton_indexed || 0).toLocaleString();
 			
 			var tscomp = byId('token-session-compilations');
 			if (tscomp) tscomp.textContent = (session.context_compilations || 0).toLocaleString();
@@ -1016,7 +1083,7 @@ window.addEventListener('message', function (e) {
 		if (dnaExplain) {
 			if (dna && typeof dna.indexed_files === 'number') {
 				var explanation = typeof dna.explainability_summary === 'string' ? dna.explainability_summary : '';
-				dnaExplain.innerHTML = explanation ? '<div><div class="w-full mb-1 font-bold">Explainability:</div><div>' + escapeHtml(explanation) + '</div></div>' : '';
+				dnaExplain.innerHTML = explanation ? '<div><div class="w-full mt-2 mb-1 font-bold">Explainability:</div><div>' + escapeHtml(explanation) + '</div></div>' : '';
 			} else {
 				dnaExplain.textContent = 'No DNA snapshot';
 			}
@@ -1030,7 +1097,7 @@ window.addEventListener('message', function (e) {
 				? Object.entries(languageBreakdown).sort(function(a, b) { return b[1] - a[1]; })
 				: [];
 			if (langEntries.length > 0) {
-				var langHtml = '<div class="w-full">'
+				var langHtml = '<div class="mt-2 w-full">'
 					+ '<div class="text-sm mb-1">Languages:</div>'
 					+ langEntries.map(function(entry) {
 						var name = escapeHtml(entry[0].charAt(0).toUpperCase() + entry[0].slice(1));
@@ -1065,10 +1132,10 @@ window.addEventListener('message', function (e) {
 			var hotZones = dna && Array.isArray(dna.hot_zones) ? dna.hot_zones : [];
 			var circular = dna && Array.isArray(dna.circular_risks) ? dna.circular_risks : [];
 			var hotHtml = hotZones.length > 0
-				? '<div class="w-full"><div class="w-full text-sm">Hot zones:</div><div class="w-full space-y-0.5">' + hotZones.slice(0, 4).map(stripRoot).map(file => '<div>— ' + escapeHtml(file) + '</div>').join('') + '</div></div>'
+				? '<div class="w-full"><div class="w-full text-sm">Hot zones:</div><div class="w-full space-y-0.5">' + hotZones.slice(0, 4).map(stripRoot).map(file => '<div>[PATH] ' + escapeHtml(file) + '</div>').join('') + '</div></div>'
 				: '<div style="color:var(--vscode-descriptionForeground)">No hot zones detected</div>';
 			if (circular.length > 0) {
-				hotHtml += '<div class="w-full"><div class="w-full text-sm">Circular risks:</div><div class="w-full space-y-0.5">' + circular.slice(0, 3).map(stripRoot).map(file => '<div>— ' + escapeHtml(file) + '</div>').join('') + '</div></div>';
+				hotHtml += '<div class="w-full"><div class="w-full text-sm">Circular risks:</div><div class="w-full space-y-0.5">' + circular.slice(0, 3).map(stripRoot).map(file => '<div>[PATH] ' + escapeHtml(file) + '</div>').join('') + '</div></div>';
 			}
 			dnaHot.innerHTML = hotHtml;
 		}
@@ -1076,7 +1143,7 @@ window.addEventListener('message', function (e) {
 		if (dnaStable) {
 			var stableZones = dna && Array.isArray(dna.stable_zones) ? dna.stable_zones : [];
 			dnaStable.innerHTML = stableZones.length > 0
-				? '<div class="w-full"><div class="w-full text-sm">Stable zones:</div><div class="w-full space-y-0.5">' + stableZones.slice(0, 4).map(stripRoot).map(file => '<div>— ' + escapeHtml(file) + '</div>').join('') + '</div></div>'
+				? '<div class="w-full"><div class="w-full text-sm">Stable zones:</div><div class="w-full space-y-0.5">' + stableZones.slice(0, 4).map(stripRoot).map(file => '<div>[PATH] ' + escapeHtml(file) + '</div>').join('') + '</div></div>'
 				: '<div style="color:var(--vscode-descriptionForeground)">No stable zones detected</div>';
 		}
 		var dnaOtel = data.observerDnaOtel || null;
@@ -1102,13 +1169,13 @@ window.addEventListener('message', function (e) {
 			}
 		}
 		var intentFile = byId('observer-intent-active-file');
-		if (intentFile) intentFile.textContent = intent && intent.active_file ? escapeHtml(intent.active_file) : '—';
+		if (intentFile) intentFile.textContent = intent && intent.active_file ? escapeHtml(stripRoot(intent.active_file)) : '—';
 		var intentRelated = byId('observer-intent-related-files');
 		if (intentRelated) {
 			var related = intent && Array.isArray(intent.related_files) ? intent.related_files : [];
 			var tokenWeight = intent && typeof intent.token_weight === 'number' ? intent.token_weight : 0;
 			intentRelated.innerHTML = related.length > 0
-				? '<div class="w-full"><span>Related files</span> (' + tokenWeight + ' tokens)</div><div class="w-full space-y-0.5">' + related.slice(0, 4).map(stripRoot).map(file => '<div>• ' + escapeHtml(file) + '</div>').join('') + '</div>'
+				? '<div class="w-full"><span>Related files</span> (' + tokenWeight + ' tokens)</div><div class="w-full space-y-0.5">' + related.slice(0, 4).map(stripRoot).map(file => '<div>[PATH] ' + escapeHtml(file) + '</div>').join('') + '</div>'
 				: 'No predictive snapshot';
 		}
 
@@ -1200,11 +1267,13 @@ window.addEventListener('message', function (e) {
 		var importanceSummary = byId('importance-summary');
 		if (importanceSummary) {
 			if (importance && typeof importance.node_count === 'number') {
+				importanceSummary.style.color = 'inherit';
 				importanceSummary.innerHTML =
 					'<div class="stat"><span>Nodes</span><span>' + escapeHtml(importance.node_count) + '</span></div>' +
 					'<div class="stat"><span>Cycles</span><span>' + escapeHtml(importance.cycle_count || 0) + '</span></div>' +
 					'<div class="stat"><span>Topo Order</span><span>' + escapeHtml(importance.topological_order_length || 0) + '</span></div>';
 			} else {
+				importanceSummary.style.color = 'var(--vscode-descriptionForeground)';
 				importanceSummary.textContent = 'No structural graph data';
 			}
 		}
@@ -1215,10 +1284,10 @@ window.addEventListener('message', function (e) {
 			if (topFiles.length === 0) {
 				importanceTopFiles.innerHTML = '<div style="color:var(--vscode-descriptionForeground)">No load-bearing files yet</div>';
 			} else {
-				var ixHtml = '<div><b>Load-bearing files</b></div>' + topFiles.slice(0, 5).map(function(item) {
+				var ixHtml = '<div><div class="w-full">Load-bearing files</div></div>' + topFiles.slice(0, 5).map(function(item) {
 					var score = Array.isArray(item) ? item[1] : 0;
 					var file = Array.isArray(item) ? item[0] : 'unknown';
-					return '<div class="stat"><span style="max-width:75%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' +
+					return '<div class="stat"><span style="max-width:75%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">[PATH] ' +
 						escapeHtml(stripRoot(file)) + '</span><span>' + (Number(score || 0).toFixed(2)) + '</span></div>';
 				}).join('');
 				if (sccGroups.length > 0) {
@@ -1234,11 +1303,13 @@ window.addEventListener('message', function (e) {
 		var blastSummary = byId('blast-radius-summary');
 		if (blastSummary) {
 			if (blast && typeof blast.affected_count === 'number') {
+				blastSummary.style.color = 'inherit';
 				blastSummary.innerHTML =
-					'<div>' + escapeHtml(blast.source || data.activeFile || '—') + '</div>' +
+					// '<div>' + escapeHtml(blast.source || data.activeFile || '—') + '</div>' +
 					'<div class="stat"><span>Affected files</span><span>' + escapeHtml(blast.affected_count) + '</span></div>' +
 					'<div class="stat"><span>Depth</span><span>' + escapeHtml(blast.max_depth || 0) + '</span></div>';
 			} else {
+				blastSummary.style.color = 'var(--vscode-descriptionForeground)';
 				blastSummary.textContent = 'No blast radius available';
 			}
 		}
@@ -1252,12 +1323,12 @@ window.addEventListener('message', function (e) {
 				var blastHtml = '';
 				if (criticalPath.length > 0) {
 					blastHtml += '<div class="w-full"><div class="w-full text-sm">Critical path:</div><div class="w-full space-y-0.5">' +
-						criticalPath.map(escapeHtml).join(' → ') + '</div></div>';
+						criticalPath.map(stripRoot).map(file => '<div>[PATH] ' + escapeHtml(file) + '</div>').join('') + '</div></div>';
 				}
 				if (affectedFiles.length > 0) {
 					blastHtml += '<div class="w-full"><div class="w-full text-sm">Reach:</div><div class="w-full space-y-0.5">' +
 						affectedFiles.slice(0, 5).map(function(entry) {
-							return escapeHtml(entry.path || 'unknown') + ' (depth ' + escapeHtml(entry.depth || 0) + ')';
+							return '<div>' + escapeHtml(entry.path || 'unknown') + ' (depth ' + escapeHtml(entry.depth || 0) + ')' + '</div>';
 						}).join('<br/>') + '</div></div>';
 				}
 				blastDetails.innerHTML = blastHtml;
@@ -1268,46 +1339,73 @@ window.addEventListener('message', function (e) {
 		var causalSummary = byId('causal-chain-summary');
 		if (causalSummary) {
 			if (causal && Array.isArray(causal.symbols)) {
+				causalSummary.style.color = 'inherit';
 				causalSummary.innerHTML =
-					'<div>' + escapeHtml(causal.file || data.activeFile || '—') + '</div>' +
-					'<div class="stat"><span>Symbols</span><span>' + escapeHtml(causal.symbols.length) + '</span></div>' +
-					'<div class="stat"><span>Outgoing</span><span>' + escapeHtml(causal.total_outgoing_edges || 0) + '</span></div>' +
-					'<div class="stat"><span>Incoming</span><span>' + escapeHtml(causal.total_incoming_edges || 0) + '</span></div>';
+					// '<div>' + escapeHtml(causal.file || data.activeFile || '—') + '</div>' +
+					'<div class="stat"><span>Functions</span><span>' + escapeHtml(causal.symbols.length) ? escapeHtml(causal.symbols.length) : '—' + '</span></div>' +
+					'<div class="stat"><span>Calls Out</span><span>' + escapeHtml(causal.total_outgoing_edges || 0) ? escapeHtml(causal.total_outgoing_edges || 0) : '—' + '</span></div>' +
+					'<div class="stat"><span>Calls In</span><span>' + escapeHtml(causal.total_incoming_edges || 0) ? escapeHtml(causal.total_incoming_edges || 0) : '—' + '</span></div>';
 			} else {
+				causalSummary.style.color = 'var(--vscode-descriptionForeground)';
 				causalSummary.textContent = 'No causal chain available';
 			}
 		}
 		var causalDetails = byId('causal-chain-details');
-		if (causalDetails) {
-			var symbols = causal && Array.isArray(causal.symbols) ? causal.symbols : [];
-			if (symbols.length === 0) {
-				causalDetails.innerHTML = '<div style="color:var(--vscode-descriptionForeground)">No resolved symbol-level edges yet</div>';
-			} else {
-				causalDetails.innerHTML = symbols.slice(0, 4).map(function(symbolEntry) {
-					var outgoing = Array.isArray(symbolEntry.calls) ? symbolEntry.calls.slice(0, 3) : [];
-					var incoming = Array.isArray(symbolEntry.called_by) ? symbolEntry.called_by.slice(0, 3) : [];
-					var outgoingHtml = outgoing.length > 0
-						? outgoing.map(function(edge) {
-							var target = edge.callee_file
-								? escapeHtml(edge.callee_file) + ' :: ' + escapeHtml(edge.callee_symbol || 'unknown')
-								: escapeHtml(edge.callee_symbol || 'unknown');
-							return target + (edge.callee_line ? ' (line ' + escapeHtml(edge.callee_line) + ')' : '');
-						}).join('<br/>')
-						: 'none';
-					var incomingHtml = incoming.length > 0
-						? incoming.map(function(edge) {
-							return escapeHtml(edge.caller_file || 'unknown') + ' :: ' + escapeHtml(edge.caller_symbol || 'unknown') +
-								(edge.call_line ? ' (line ' + escapeHtml(edge.call_line) + ')' : '');
-						}).join('<br/>')
-						: 'none';
-					return '<div style="margin-bottom:10px;font-size:11px;line-height:1.4">' +
-						'<b>' + escapeHtml(symbolEntry.symbol || 'unknown') + '</b>' +
-						'<div style="margin-top:4px"><b>Calls:</b><br/>' + outgoingHtml + '</div>' +
-						'<div style="margin-top:4px"><b>Called by:</b><br/>' + incomingHtml + '</div>' +
-						'</div>';
-				}).join('');
-			}
-		}
+		// if (causalDetails) {
+		// 	var symbols = causal && Array.isArray(causal.symbols) ? causal.symbols : [];
+		// 	if (symbols.length === 0) {
+		// 		causalDetails.innerHTML = '<div style="color:var(--vscode-descriptionForeground)">No resolved symbol-level edges yet</div>';
+		// 	} else {
+		// 		// Build a more readable representation
+		// 		var html = symbols.slice(0, 4).map(function(symbolEntry) {
+		// 			var symbolName = escapeHtml(symbolEntry.symbol || 'unknown');
+		// 			var calls = Array.isArray(symbolEntry.calls) ? symbolEntry.calls.slice(0, 3) : [];
+		// 			var calledBy = Array.isArray(symbolEntry.called_by) ? symbolEntry.called_by.slice(0, 3) : [];
+
+		// 			// Format a list of calls/callers
+		// 			function formatEdgeList(edges) {
+		// 				if (edges.length === 0) return '<span class="muted">none</span>';
+		// 				return edges.map(function(edge) {
+		// 					var target = edge.callee_file
+		// 						? escapeHtml(edge.callee_file) + ' :: ' + escapeHtml(edge.callee_symbol || 'unknown')
+		// 						: escapeHtml(edge.callee_symbol || 'unknown');
+		// 					var lineInfo = edge.callee_line ? ' (line ' + escapeHtml(edge.callee_line) + ')' : '';
+		// 					return '• ' + target + lineInfo;
+		// 				}).join('<br>');
+		// 			}
+
+		// 			function formatCallerList(edges) {
+		// 				if (edges.length === 0) return '<span class="muted">none</span>';
+		// 				return edges.map(function(edge) {
+		// 					var caller = escapeHtml(edge.caller_file || 'unknown') + ' :: ' + escapeHtml(edge.caller_symbol || 'unknown');
+		// 					var lineInfo = edge.call_line ? ' (line ' + escapeHtml(edge.call_line) + ')' : '';
+		// 					return '• ' + caller + lineInfo;
+		// 				}).join('<br>');
+		// 			}
+
+		// 			return `
+		// 				<div class="causal-symbol">
+		// 					<div class="symbol-name">${symbolName}</div>
+		// 					<div class="symbol-calls">
+		// 						<div class="section-title">⬇ Calls</div>
+		// 						<div class="section-content">${formatEdgeList(calls)}</div>
+		// 					</div>
+		// 					<div class="symbol-calledby">
+		// 						<div class="section-title">⬆ Called by</div>
+		// 						<div class="section-content">${formatCallerList(calledBy)}</div>
+		// 					</div>
+		// 				</div>
+		// 			`;
+		// 		}).join('');
+
+		// 		// Add a "more" indicator if there are more than 4 symbols
+		// 		if (symbols.length > 4) {
+		// 			html += '<div class="more-indicator">+ ' + (symbols.length - 4) + ' more functions</div>';
+		// 		}
+
+		// 		causalDetails.innerHTML = html;
+		// 	}
+		// }
 
 		var agentCfg = data.agentConfig || null;
 		var agentCfgEl = byId('agent-config-summary');
@@ -1336,11 +1434,13 @@ window.addEventListener('message', function (e) {
 		var compiledSummary = byId('compiled-context-summary');
 		if (compiledSummary) {
 			if (compiled && typeof compiled.total_tokens === 'number') {
-				compiledSummary.innerHTML = '<div>' + escapeHtml(data.activeFile || 'Active file unavailable') + '</div>' +
-					'<div class="stat mt-1"><span>Task</span>' + '<span class="capitalize">' + escapeHtml((data.inferredTaskType || '').replace(/_/g, ' ') || 'unknown') + '</span></div>' + 
+				// compiledSummary.innerHTML = '<div>' + escapeHtml(data.activeFile || 'Active file unavailable') + '</div>';
+				compiledSummary.style.color = 'inherit';
+				compiledSummary.innerHTML = '<div class="stat mt-1"><span>Task</span>' + '<span class="capitalize">' + escapeHtml((data.inferredTaskType || '').replace(/_/g, ' ') || 'unknown') + '</span></div>' + 
 					'<div class="stat"><span>Tokens/Budget</span>' + '<span>' + escapeHtml(compiled.total_tokens) + '/' + escapeHtml(compiled.budget) + '</span></div>' +
 					'<div class="mb-2 mt-1" style="color:var(--vscode-descriptionForeground)">' + escapeHtml(compiled.explainability_summary || '') + '</div>';
 			} else {
+				compiledSummary.style.color = 'var(--vscode-descriptionForeground)';
 				compiledSummary.textContent = 'No compiled context';
 			}
 		}
@@ -1348,7 +1448,7 @@ window.addEventListener('message', function (e) {
 		if (compiledSections) {
 			var sections = compiled && Array.isArray(compiled.selected_sections) ? compiled.selected_sections : [];
 			compiledSections.innerHTML = sections.length > 0
-				? '<div><b>Selected sections:</b></div>' + sections.slice(0, 5).map(function(section) {
+				? '<div><div class="w-full mb-1">Selected sections:</div></div>' + sections.slice(0, 5).map(function(section) {
 					return '<div class="stat"><span class="capitalize">' + escapeHtml(section.kind) + '</span>' + '<span>' + escapeHtml(section.tokens) + ' tokens</span></div>';
 				}).join('')
 				: '<div style="color:var(--vscode-descriptionForeground)">No selected sections</div>';
@@ -1373,10 +1473,10 @@ window.addEventListener('message', function (e) {
 			var pastBreaks = risk && Array.isArray(risk.past_breaks) ? risk.past_breaks : [];
 			var riskParts = [];
 			if (knownIssues.length > 0) {
-				riskParts.push('<b>Known issues:</b><br/>' + knownIssues.slice(0, 3).map(escapeHtml).join('<br/>'));
+				riskParts.push('<b>Known issues:</b><br/>' + knownIssues.slice(0, 3).map(renderWarningCompact).join('<br/>'));
 			}
 			if (pastBreaks.length > 0) {
-				riskParts.push('<b>Past breaks:</b><br/>' + pastBreaks.slice(0, 3).map(escapeHtml).join('<br/>'));
+				riskParts.push('<b>Past breaks:</b><br/>' + pastBreaks.slice(0, 3).map(renderWarningCompact).join('<br/>'));
 			}
 			riskDetails.innerHTML = riskParts.length > 0
 				? '<div style="font-size:11px;line-height:1.4">' + riskParts.join('<br/><br/>') + '</div>'
@@ -1387,10 +1487,12 @@ window.addEventListener('message', function (e) {
 		var promptOptEl = byId('prompt-optimization-summary');
 		if (promptOptEl) {
 			if (promptOpt && typeof promptOpt.recommended_budget === 'number') {
-				promptOptEl.innerHTML = '<div class="stat"><span>Task</span>' + '<span>' + escapeHtml((promptOpt.task_type || '').replace(/_/g, ' ') || (data.inferredTaskType || '').replace(/_/g, ' ') || 'unknown') + '</span></div>' + 
-					'<div class="stat"><span>Recommended budget</span>' + '<span>' + escapeHtml(promptOpt.recommended_budget) + ' tokens</span></div>' + 
+				promptOptEl.style.color = 'inherit';
+				promptOptEl.innerHTML = '<div class="stat"><span>Task</span>' + '<span class="capitalize">' + escapeHtml((promptOpt.task_type || '').replace(/_/g, ' ') || (data.inferredTaskType || '').replace(/_/g, ' ') || 'unknown') + '</span></div>' + 
+					'<div class="stat"><span>Recommended budget</span>' + '<span>' + promptOpt.recommended_budget + ' tokens</span></div>' + 
 					'<div class="mt-2" style="color:var(--vscode-descriptionForeground)">' + (promptOpt.always_include || []).map(escapeHtml).join(', ') + '</div>';
 			} else {
+				promptOptEl.style.color = 'var(--vscode-descriptionForeground)';
 				promptOptEl.textContent = 'No learning data';
 			}
 		}

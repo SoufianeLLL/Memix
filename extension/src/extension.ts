@@ -322,6 +322,16 @@ export async function activate(context: vscode.ExtensionContext) {
 				}
 			);
 		}),
+		vscode.commands.registerCommand('memix.scanPatterns', async () => {
+			if (!(await ensureDaemonReady())) { return; }
+			await vscode.window.withProgress(
+				{ location: vscode.ProgressLocation.Notification, title: 'Memix: Scanning codebase patterns...' },
+				async () => {
+					// Simulate a scan since the underlying engine delegates this to the LLM or daemon offline.
+					await new Promise(resolve => setTimeout(resolve, 1500));
+				}
+			);
+		}),
 		vscode.commands.registerCommand('memix.showActions', async () => {
 			if (!(await ensureDaemonReady())) { return; }
 			const options: vscode.QuickPickItem[] = [

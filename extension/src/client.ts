@@ -461,6 +461,28 @@ export class MemoryClient {
 		});
 	}
 
+	static async getSkeletonStats(projectId: string): Promise<{ project_id: string; fsi_count: number; fusi_count: number; total: number; size_bytes: number; capacity: number } | null> {
+		return new Promise((resolve, reject) => {
+			const sanitizedProjectId = encodeURIComponent(projectId);
+			const requestPath = `${API_PREFIX}/skeleton/stats/${sanitizedProjectId}`;
+			const req = http.request(getRequestOptions('GET', requestPath), (res) => {
+				if (res.statusCode !== 200) {
+					resolve(null);
+					return;
+				}
+				readResponseBody(res).then((data) => {
+					try {
+						resolve(JSON.parse(data || '{}'));
+					} catch (e) {
+						resolve(null);
+					}
+				}, reject);
+			});
+			req.on('error', reject);
+			req.end();
+		});
+	}
+
 	static async getRedisStats(): Promise<RedisStats> {
 		return new Promise((resolve, reject) => {
 			const requestPath = `${API_PREFIX}/redis/stats`;
