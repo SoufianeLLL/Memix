@@ -34,6 +34,10 @@ pub struct RedisStorage {
         String,
         (std::time::Instant, Vec<crate::brain::schema::MemoryEntry>),
     >>,
+	skeleton_cache: tokio::sync::RwLock<std::collections::HashMap<
+        String,
+        (std::time::Instant, Vec<crate::brain::schema::MemoryEntry>),
+    >>,
 }
 
 impl RedisStorage {
@@ -167,6 +171,7 @@ impl RedisStorage {
 			embedding_cache: Cache::builder().max_capacity(10_000).build(),
 			// Empty cache — populated lazily on first get_entries call per project.
 			entry_cache: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+			skeleton_cache: tokio::sync::RwLock::new(std::collections::HashMap::new()),
 		})
 	}
 
@@ -414,6 +419,11 @@ impl RedisStorage {
 	/// Upsert a skeleton entry (FSI or FuSI) into the isolated skeleton hash.
 	/// If at capacity and this is a new entry, evicts the oldest entry by updated_at.
 	pub async fn upsert_skeleton_entry(&self, project_id: &str, entry: MemoryEntry) -> Result<()> {
+		{
+			let mut cache = self.skeleton_cache.write().await;
+			cache.remove(project_id);
+		}
+
 		let mut conn = self.get_conn().await?;
 		let hash_key = Self::skeleton_hash_key(project_id);
 		let already_exists: bool = conn.hexists(&hash_key, &entry.id).await.unwrap_or(false);
@@ -452,6 +462,17 @@ impl RedisStorage {
 
 	/// Get all skeleton entries (FSI + FuSI) for a project.
 	pub async fn get_skeleton_entries(&self, project_id: &str) -> Result<Vec<MemoryEntry>> {
+		// Check cache first (TTL 60 seconds since files change less rapidly than AI chat)
+        {
+            let cache = self.skeleton_cache.read().await;
+            if let Some((fetched_at, entries)) = cache.get(project_id) {
+                if fetched_at.elapsed().as_secs() < 60 {
+                    return Ok(entries.clone());
+                }
+            }
+        }
+
+		// Cache miss: hit Redis
 		let mut conn = self.get_conn().await?;
 		let hash_key = Self::skeleton_hash_key(project_id);
 		let values: Vec<String> = conn.hvals(&hash_key).await.unwrap_or_default();
@@ -459,23 +480,44 @@ impl RedisStorage {
 			.iter()
 			.filter_map(|v| serde_json::from_str::<MemoryEntry>(v).ok())
 			.collect();
+
+        // Update cache
+        {
+            let mut cache = self.skeleton_cache.write().await;
+            cache.insert(
+                project_id.to_string(),
+                (std::time::Instant::now(), entries.clone()),
+            );
+        }
+
 		Ok(entries)
 	}
 
 	/// Delete a specific skeleton entry by ID.
 	pub async fn delete_skeleton_entry(&self, project_id: &str, entry_id: &str) -> Result<()> {
+		{
+			let mut cache = self.skeleton_cache.write().await;
+			cache.remove(project_id);
+		}
+
 		let mut conn = self.get_conn().await?;
 		let hash_key = Self::skeleton_hash_key(project_id);
 		let _: () = conn.hdel(&hash_key, entry_id).await?;
 		Ok(())
 	}
 
-	/// Returns (fsi_count, fusi_count, total) for the skeleton index.
-	pub async fn skeleton_stats(&self, project_id: &str) -> Result<(usize, usize, usize)> {
+	/// Returns (fsi_count, fusi_count, total, size_bytes) for the skeleton index.
+	pub async fn skeleton_stats(&self, project_id: &str) -> Result<(usize, usize, usize, usize)> {
 		let entries = self.get_skeleton_entries(project_id).await?;
 		let fsi = entries.iter().filter(|e| e.tags.contains(&"fsi".to_string())).count();
 		let fusi = entries.iter().filter(|e| e.tags.contains(&"fusi".to_string())).count();
-		Ok((fsi, fusi, entries.len()))
+		let mut size_bytes = 0;
+		for e in &entries {
+			if let Ok(json) = serde_json::to_string(e) {
+				size_bytes += json.len();
+			}
+		}
+		Ok((fsi, fusi, entries.len(), size_bytes))
 	}
 
 	/// Performs the actual Redis HVALS read for a project. Called only on cache miss.
@@ -513,6 +555,11 @@ impl RedisStorage {
 
 #[async_trait]
 impl StorageBackend for RedisStorage {
+	async fn embed_text(&self, text: &str) -> Vec<f32> {
+        // Calls your internal `embed_text` which uses `self.embedding_cache`
+        RedisStorage::embed_text(self, text).await
+    }
+	
 	async fn get_entries(&self, project_id: &str) -> Result<Vec<MemoryEntry>> {
 		tracing::debug!("📦 get_entries called for project: {}", project_id);
 
@@ -619,7 +666,13 @@ impl StorageBackend for RedisStorage {
 		// Without this, a pending.json update would be invisible for up to 20 seconds.
 		{
 			let mut cache = self.entry_cache.write().await;
-			cache.remove(project_id);
+			if let Some((_, entries)) = cache.get_mut(project_id) {
+				if let Some(pos) = entries.iter().position(|e| e.id == entry.id) {
+					entries[pos] = entry.clone(); // Update existing
+				} else {
+					entries.push(entry.clone()); // Add new
+				}
+			}
 		}
 
 		let mut conn = self.get_conn().await?;
@@ -835,7 +888,7 @@ impl StorageBackend for RedisStorage {
 		RedisStorage::delete_skeleton_entry(self, project_id, entry_id).await
 	}
 
-	async fn skeleton_stats(&self, project_id: &str) -> Result<(usize, usize, usize)> {
+	async fn skeleton_stats(&self, project_id: &str) -> Result<(usize, usize, usize, usize)> {
 		RedisStorage::skeleton_stats(self, project_id).await
 	}
  }

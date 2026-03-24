@@ -105,11 +105,11 @@ impl BackgroundIndexer {
             let _ = self.storage.upsert_skeleton_entry(&self.project_id, fsi_entry).await;
 
             // Layer 3: compute embedding for this skeleton entry
-            // embed_text is async and uses spawn_blocking internally, so this
-            // doesn't block the executor even though it's CPU-heavy.
-            let embedding = crate::storage::redis::RedisStorage::embed_text_static(
-                &content_for_embedding
-            ).await;
+            // Use the trait method which utilizes the RedisStorage embedding_cache
+            let embedding = self.storage.embed_text(&content_for_embedding).await;
+
+            // Track the cache miss (background indexing is inherently calculating missing embeddings)
+            self.token_tracker.session.embedding_cache_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
             self.embedding_store.upsert(&entry_id, embedding).await;
             self.token_tracker.session.files_skeleton_indexed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

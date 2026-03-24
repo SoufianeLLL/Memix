@@ -38,6 +38,9 @@ pub trait StorageBackend: Send + Sync {
     async fn search_similar(&self, project_id: &str, query: &str) -> Result<Vec<MemoryEntry>>;
     async fn delete_entry(&self, project_id: &str, entry_id: &str) -> Result<()>;
     async fn purge_project(&self, project_id: &str) -> Result<()>;
+    async fn embed_text(&self, text: &str) -> Vec<f32> {
+        Vec::new() // Default empty implementation
+    }
 
     /// Export all brain entries for a project to the daemon-managed JSON mirror directory.
     /// Returns the number of entries written.
@@ -82,10 +85,10 @@ pub trait StorageBackend: Send + Sync {
         Ok(())
     }
 
-    /// Returns (fsi_count, fusi_count, total) for the skeleton index.
-    async fn skeleton_stats(&self, project_id: &str) -> Result<(usize, usize, usize)> {
+    /// Returns (fsi_count, fusi_count, total, size_bytes) for the skeleton index.
+    async fn skeleton_stats(&self, project_id: &str) -> Result<(usize, usize, usize, usize)> {
         let _ = project_id;
-        Ok((0, 0, 0))
+        Ok((0, 0, 0, 0))
     }
 }
 

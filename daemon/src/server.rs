@@ -668,11 +668,12 @@ async fn skeleton_stats(
 	Path(project_id): Path<String>,
 ) -> impl IntoResponse {
 	match state.storage.skeleton_stats(&project_id).await {
-		Ok((fsi, fusi, total)) => (StatusCode::OK, Json(serde_json::json!({
+		Ok((fsi, fusi, total, size_bytes)) => (StatusCode::OK, Json(serde_json::json!({
 			"project_id": project_id,
 			"fsi_count": fsi,
 			"fusi_count": fusi,
 			"total": total,
+			"size_bytes": size_bytes,
 			"capacity": 2000
 		}))).into_response(),
 		Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -1316,17 +1317,20 @@ async fn compile_context(
 	);
 	let history = state.recorder.dump_blackbox();
 	let root = state.workspace_root.as_deref().filter(|s| s.len() < 1024).map(PathBuf::from);
-	        let compiler = ContextCompiler::new(root);
-        match compiler.compile(req, &graph, &history, &entries, &skeleton_entries, causal_context) {
-                Ok(compiled) => {
-                        state.token_tracker.session.record_context_compilation(
-                                compiled.total_tokens as u64,
-                                compiled.naive_token_estimate,
-                        );
-                        (StatusCode::OK, Json(compiled)).into_response()
-                }
-                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-        }
+	let compiler = ContextCompiler::new(root);
+	match compiler.compile(req, &graph, &history, &entries, &skeleton_entries, causal_context) {
+		Ok(compiled) => {
+			// Wire the compilation result into token intelligence.
+			// total_tokens is what Memix actually sent; naive_token_estimate is what
+			// a raw file dump would have cost — the difference is the savings.
+			state.token_tracker.session.record_context_compilation(
+				compiled.total_tokens as u64,
+				compiled.naive_token_estimate,
+			);
+			(StatusCode::OK, Json(compiled)).into_response()
+		}
+		Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+	}
 }
 
 async fn get_agent_configs(State(state): State<Arc<AppState>>) -> impl IntoResponse {

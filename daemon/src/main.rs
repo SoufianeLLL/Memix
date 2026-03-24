@@ -942,15 +942,38 @@ async fn main() -> anyhow::Result<()> {
 		});
 	}
 
-	// Periodic flush: token stats and embeddings to disk
+	// Periodic flush: token stats, embeddings, and warning cleanup
 	let flush_token_tracker = token_tracker.clone();
 	let flush_embedding_store = embedding_store.clone();
+	let flush_storage = storage_backend.clone();
 	let flush_project_id = project_id_for_events.clone();
 	tokio::spawn(async move {
 		let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
 		loop {
 			interval.tick().await;
 			let _ = flush_token_tracker.flush_session_to_lifetime(&flush_project_id).await;
+			
+			// Prune stale warning entries: keep only the 10 most recent per project,
+			// and never keep any older than 48 hours. Warnings are diagnostic signals,
+			// not permanent memory — they should not accumulate indefinitely.
+			if let Ok(entries) = flush_storage.get_entries(&flush_project_id).await {
+				let cutoff = chrono::Utc::now() - chrono::Duration::hours(48);
+				let mut warnings: Vec<_> = entries.into_iter()
+					.filter(|e| e.kind == MemoryKind::Warning &&
+								e.id.starts_with("warning_signature_"))
+					.collect();
+				
+				// Sort newest first
+				warnings.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+				
+				// Delete anything beyond the 10 most recent or older than 48h
+				for entry in warnings.iter().skip(10).chain(
+					warnings.iter().filter(|e| e.created_at < cutoff)
+				) {
+					let _ = flush_storage.delete_entry(&flush_project_id, &entry.id).await;
+				}
+			}
+
 			// ── MULTI-IDE NOTE ────────────────────────────────────────────────────
 			// When multi-IDE support is built, change flush_disk_only() back to
 			// flush() and pass the actual Redis client so the embedding store syncs
@@ -1040,6 +1063,7 @@ async fn main() -> anyhow::Result<()> {
 		}
 	});
 
+    let project_id_for_spawn = project_id_for_events.clone();
     tokio::spawn(async move {
 		// Find the real git root by walking up from workspace_root
 		let git_root = {
@@ -1137,13 +1161,13 @@ async fn main() -> anyhow::Result<()> {
 					// ─── Skeleton cleanup on file deletion ─────────────────────
 					call_graph_for_events.lock().await.remove_file(&key);
 					let fsi_id = crate::observer::skeleton::file_skeleton_id(&key);
-					let _ = storage_for_events.delete_skeleton_entry(&project_id_for_events, &fsi_id).await;
+					let _ = storage_for_events.delete_skeleton_entry(&project_id_for_spawn, &fsi_id).await;
 					// Delete all FuSI entries for this file (prefix match)
 					let fusi_prefix = format!("fusi::{}", crate::observer::skeleton::normalize_path(&key));
-					if let Ok(entries) = storage_for_events.get_skeleton_entries(&project_id_for_events).await {
+					if let Ok(entries) = storage_for_events.get_skeleton_entries(&project_id_for_spawn).await {
 						for entry in entries {
 							if entry.id.starts_with(&fusi_prefix) {
-								let _ = storage_for_events.delete_skeleton_entry(&project_id_for_events, &entry.id).await;
+								let _ = storage_for_events.delete_skeleton_entry(&project_id_for_spawn, &entry.id).await;
 							}
 						}
 					}
@@ -1223,6 +1247,25 @@ async fn main() -> anyhow::Result<()> {
 					intent_type: intent.as_str().to_string(),
 				});
 
+				// Filter out visibility-only changes: adding/removing pub, pub(crate), async
+				// as a prefix is not a breaking change — callers are unaffected.
+				// Only warn when the parameter list, return type, or function name actually changed.
+				let genuinely_breaking: Vec<_> = breaking_signatures.iter()
+					.filter(|(_, old_sig, new_sig)| {
+						// Strip common visibility and async prefixes before comparing
+						let normalize = |s: &str| -> String {
+							s.trim()
+							.trim_start_matches("pub(crate)")
+							.trim_start_matches("pub")
+							.trim_start_matches("async")
+							.trim_start_matches("impl")
+							.trim()
+							.to_string()
+						};
+						normalize(old_sig) != normalize(new_sig)
+					})
+					.collect();
+
 				// Only fire a breaking signature warning when:
 				// 1. We actually had a prior snapshot (old_bytes non-empty), AND
 				// 2. The old snapshot had real content (not just a cache cold-start), AND
@@ -1242,7 +1285,7 @@ async fn main() -> anyhow::Result<()> {
 							now.timestamp_millis(),
 							uuid::Uuid::new_v4()
 						),
-						project_id: project_id_for_events.clone(),
+						project_id: project_id_for_spawn.clone(),
 						kind: MemoryKind::Warning,
 						content: format!(
 							"Potential breaking signature change detected in {}:\n{}",
@@ -1266,7 +1309,7 @@ async fn main() -> anyhow::Result<()> {
 						last_accessed_at: None,
 					};
 					let _ = storage_for_events
-						.upsert_entry(&project_id_for_events, warning_entry)
+						.upsert_entry(&project_id_for_spawn, warning_entry)
 						.await;
 				}
 
@@ -1300,7 +1343,7 @@ async fn main() -> anyhow::Result<()> {
 								now.timestamp_millis(),
 								uuid::Uuid::new_v4()
 							),
-							project_id: project_id_for_events.clone(),
+							project_id: project_id_for_spawn.clone(),
 							kind: MemoryKind::Warning,
 							content: format!(
 								"Unresolved import(s) detected in {}:\n{}",
@@ -1328,7 +1371,7 @@ async fn main() -> anyhow::Result<()> {
 							last_accessed_at: None,
 						};
 						let _ = storage_for_events
-							.upsert_entry(&project_id_for_events, warning_entry)
+							.upsert_entry(&project_id_for_spawn, warning_entry)
 							.await;
 					}
 					analysis
@@ -1378,8 +1421,8 @@ async fn main() -> anyhow::Result<()> {
 							&dep_graph_snapshot,
 							&String::from_utf8_lossy(&new_bytes),
 						);
-						let fsi_entry = skeleton.to_memory_entry(&project_id_for_events);
-						if let Err(e) = storage_for_events.upsert_skeleton_entry(&project_id_for_events, fsi_entry).await {
+						let fsi_entry = skeleton.to_memory_entry(&project_id_for_spawn);
+						if let Err(e) = storage_for_events.upsert_skeleton_entry(&project_id_for_spawn, fsi_entry).await {
 							tracing::warn!("Skeleton: FSI upsert failed for {}: {}", key, e);
 						}
 
@@ -1387,9 +1430,9 @@ async fn main() -> anyhow::Result<()> {
 						let is_hot = is_hot_file(&key, &feature_snapshots, &dep_graph_snapshot);
 						if is_hot {
 							let call_graph_snapshot = call_graph_for_events.lock().await;
-							let symbol_entries = skeleton.to_symbol_entries(&project_id_for_events, &call_graph_snapshot);
+							let symbol_entries = skeleton.to_symbol_entries(&project_id_for_spawn, &call_graph_snapshot);
 							for entry in symbol_entries {
-								if let Err(e) = storage_for_events.upsert_skeleton_entry(&project_id_for_events, entry).await {
+								if let Err(e) = storage_for_events.upsert_skeleton_entry(&project_id_for_spawn, entry).await {
 									tracing::warn!("Skeleton: FuSI upsert failed: {}", e);
 								}
 							}
@@ -1430,7 +1473,7 @@ async fn main() -> anyhow::Result<()> {
 								now.timestamp_millis(),
 								uuid::Uuid::new_v4()
 							),
-							project_id: project_id_for_events.clone(),
+							project_id: project_id_for_spawn.clone(),
 							kind: MemoryKind::Warning,
 							content: format!(
 								"Dependency graph references missing file(s) from {}:\n{}",
@@ -1458,7 +1501,7 @@ async fn main() -> anyhow::Result<()> {
 							last_accessed_at: None,
 						};
 						let _ = storage_for_events
-							.upsert_entry(&project_id_for_events, warning_entry)
+							.upsert_entry(&project_id_for_spawn, warning_entry)
 							.await;
 					}
 					let related_files = {
@@ -1523,7 +1566,7 @@ async fn main() -> anyhow::Result<()> {
 				let reports = {
 					let mut runtime = agent_runtime_for_events.lock().await;
 					runtime.process_file_save(&FileSaveAgentContext {
-						project_id: project_id_for_events.clone(),
+						project_id: project_id_for_spawn.clone(),
 						file_path: key.clone(),
 						file_content: String::from_utf8_lossy(&new_bytes).to_string(),
 						diff: diff_for_agents,
@@ -1543,7 +1586,7 @@ async fn main() -> anyhow::Result<()> {
 					};
 					let entry = MemoryEntry {
 						id: report.entry_id.clone(),
-						project_id: project_id_for_events.clone(),
+						project_id: project_id_for_spawn.clone(),
 						kind,
 						content: serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string()),
 						tags: vec![
@@ -1563,11 +1606,11 @@ async fn main() -> anyhow::Result<()> {
 						last_accessed_at: None,
 					};
 					let _ = storage_for_events
-						.upsert_entry(&project_id_for_events, entry)
+						.upsert_entry(&project_id_for_spawn, entry)
 						.await;
-					if let Some(output_entry) = build_agent_output_entry(&project_id_for_events, &report) {
+					if let Some(output_entry) = build_agent_output_entry(&project_id_for_spawn, &report) {
 						let _ = storage_for_events
-							.upsert_entry(&project_id_for_events, output_entry)
+							.upsert_entry(&project_id_for_spawn, output_entry)
 							.await;
 					}
 				}
@@ -1654,7 +1697,7 @@ async fn main() -> anyhow::Result<()> {
 
 					if let (Some(graph_json), Some(changes_json), Some(dna_json), Some(file_map_json), Some(known_issues_json)) = (graph_json, changes_json, dna_json, file_map_json, known_issues_json) {
 						let graph_entry = make_observer_entry(
-							&project_id_for_events,
+							&project_id_for_spawn,
 							"observer_graph.json",
 							graph_json,
 							vec!["observer".to_string(), "graph".to_string()],
@@ -1662,7 +1705,7 @@ async fn main() -> anyhow::Result<()> {
 							MemoryKind::Context,
 						);
 						let changes_entry = make_observer_entry(
-							&project_id_for_events,
+							&project_id_for_spawn,
 							"observer_changes.json",
 							changes_json,
 							vec!["observer".to_string(), "changes".to_string()],
@@ -1670,7 +1713,7 @@ async fn main() -> anyhow::Result<()> {
 							MemoryKind::Context,
 						);
 						let dna_entry = make_observer_entry(
-							&project_id_for_events,
+							&project_id_for_spawn,
 							"observer_dna.json",
 							dna_json,
 							vec!["observer".to_string(), "dna".to_string(), "architecture".to_string()],
@@ -1679,7 +1722,7 @@ async fn main() -> anyhow::Result<()> {
 						);
 						let intent_entry = intent_entry_json.as_ref().map(|intent_json| {
 							make_observer_entry(
-								&project_id_for_events,
+								&project_id_for_spawn,
 								"observer_intent.json",
 								intent_json.clone(),
 								vec!["observer".to_string(), "intent".to_string(), "predictive".to_string()],
@@ -1689,7 +1732,7 @@ async fn main() -> anyhow::Result<()> {
 						});
 						let git_entry = git_json.as_ref().map(|git_json| {
 							make_observer_entry(
-								&project_id_for_events,
+								&project_id_for_spawn,
 								"observer_git.json",
 								git_json.clone(),
 								vec!["observer".to_string(), "git".to_string(), "archaeology".to_string()],
@@ -1698,7 +1741,7 @@ async fn main() -> anyhow::Result<()> {
 							)
 						});
 						let file_map_entry = make_observer_entry(
-							&project_id_for_events,
+							&project_id_for_spawn,
 							"file_map",
 							file_map_json,
 							vec!["observer".to_string(), "file_map".to_string(), "generated".to_string()],
@@ -1706,7 +1749,7 @@ async fn main() -> anyhow::Result<()> {
 							MemoryKind::Context,
 						);
 						let known_issues_entry = make_observer_entry(
-							&project_id_for_events,
+							&project_id_for_spawn,
 							"known_issues",
 							known_issues_json,
 							vec!["observer".to_string(), "known_issues".to_string(), "generated".to_string()],
@@ -1715,28 +1758,28 @@ async fn main() -> anyhow::Result<()> {
 						);
 
 						let _ = storage_for_events
-							.upsert_entry(&project_id_for_events, graph_entry)
+							.upsert_entry(&project_id_for_spawn, graph_entry)
 							.await;
 						let _ = storage_for_events
-							.upsert_entry(&project_id_for_events, dna_entry)
+							.upsert_entry(&project_id_for_spawn, dna_entry)
 							.await;
 						let _ = storage_for_events
-							.upsert_entry(&project_id_for_events, changes_entry)
+							.upsert_entry(&project_id_for_spawn, changes_entry)
 							.await;
 						let _ = storage_for_events
-							.upsert_entry(&project_id_for_events, file_map_entry)
+							.upsert_entry(&project_id_for_spawn, file_map_entry)
 							.await;
 						let _ = storage_for_events
-							.upsert_entry(&project_id_for_events, known_issues_entry)
+							.upsert_entry(&project_id_for_spawn, known_issues_entry)
 							.await;
 						if let Some(intent_entry) = intent_entry {
 							let _ = storage_for_events
-								.upsert_entry(&project_id_for_events, intent_entry)
+								.upsert_entry(&project_id_for_spawn, intent_entry)
 								.await;
 						}
 						if let Some(git_entry) = git_entry {
 							let _ = storage_for_events
-								.upsert_entry(&project_id_for_events, git_entry)
+								.upsert_entry(&project_id_for_spawn, git_entry)
 								.await;
 						}
 					}
@@ -1744,6 +1787,8 @@ async fn main() -> anyhow::Result<()> {
 			}
 		}
 	});
+
+
 
 	std::future::pending::<()>().await;
 	#[allow(unreachable_code)]
