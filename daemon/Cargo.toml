@@ -1,6 +1,6 @@
 [package]
 name = "memix-daemon"
-version = "0.4.0-beta"
+version = "0.5.0-beta"
 edition = "2021"
 authors = ["DigitalVize LLC"]
 description = "High-performance Memix backend daemon for persistent AI memory"
@@ -66,6 +66,13 @@ oxc_allocator = "0.121"
 oxc_ast = "0.121.0"
 walkdir = "2"
 blake3 = "1"
+
+# Add these to your existing dependencies:
+# hyper-util = { version = "0.1", features = ["client-legacy", "tokio", "http1"] }
+rustls = { version = "0.23", features = ["ring"] }
+hyper-rustls = { version = "0.27", features = ["native-tokio", "http1", "tls12", "logging"] }
+bytes = "1"
+http-body-util = "0.1"
 
 [profile.release]
 lto = true

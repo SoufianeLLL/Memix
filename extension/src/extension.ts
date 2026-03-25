@@ -3,16 +3,15 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { BrainManager } from './core/brain';
-import { HealthMonitor } from './core/health';
 import { DebugPanelProvider } from './panel/debug-panel';
 import { exportBrain, importBrain } from './utils/exporter';
 import { hashProjectId } from './utils/crypto';
 import { SecretManager } from './core/secrets';
 import { DaemonManager } from './daemon';
-import { DaemonReadinessState, DaemonRuntimeManager } from './daemon-runtime';
 import { detectIDE } from './ide/detector';
 import { MemoryClient } from './client';
 import { LicenseManager } from './license';
+import { DaemonReadinessState, DaemonRuntimeManager } from './daemon-runtime';
 import { BRAIN_KEYS, MAX_SESSION_LOG_ENTRIES } from './utils/constants';
 import { createPromptPack, PromptPackVariant } from './utils/prompt-pack';
 

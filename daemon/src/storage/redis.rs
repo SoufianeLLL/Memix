@@ -792,16 +792,34 @@ impl StorageBackend for RedisStorage {
 
 	async fn list_projects(&self) -> Result<Vec<String>> {
 		let mut conn = self.get_conn().await?;
-		let keys: Vec<String> = conn.keys("*").await?;
-		let mut projects = Vec::new();
-		for key in keys {
-			let key_type: String = redis::cmd("TYPE").arg(&key).query_async(&mut conn).await?;
-			if key_type == "hash" {
-				projects.push(key);
+		let mut projects = std::collections::HashSet::new();
+		
+		// Use SCAN instead of KEYS to avoid blocking Redis (O(1) per iteration vs O(N) blocking)
+		// This is production-safe for large Redis instances
+		let mut cursor: u64 = 0;
+		loop {
+			let (new_cursor, keys): (u64, Vec<String>) = redis::cmd("SCAN")
+				.arg(cursor)
+				.arg("TYPE")
+				.arg("HASH")
+				.query_async(&mut conn)
+				.await?;
+			
+			for key in keys {
+				// Skip skeleton hashes - they're not projects
+				if !key.ends_with("_skeletons") {
+					projects.insert(key);
+				}
+			}
+			
+			cursor = new_cursor;
+			if cursor == 0 {
+				break;
 			}
 		}
+		
+		let mut projects: Vec<String> = projects.into_iter().collect();
 		projects.sort();
-		projects.dedup();
 		Ok(projects)
 	}
 

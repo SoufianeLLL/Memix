@@ -11,7 +11,7 @@ export const BRAIN_KEYS = {
 	TEAM_STATE: 'team:state',
 	SCORING: 'scoring',
 	META: 'meta',
-	SKELETONS: 'memix-project_skeletons'
+	SKELETONS: '_skeletons'  // Suffix pattern: actual key is {projectId}_skeletons
 } as const;
 
 export const MEMORY_TAXONOMY = {

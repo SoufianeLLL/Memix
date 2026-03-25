@@ -74,8 +74,9 @@ if (packageJson.version === versions.extensionVersion) {
 	console.log(`extension/package.json already at ${versions.extensionVersion}`);
 } else {
 	packageJson.version = versions.extensionVersion;
+	packageJson.daemonVersion = versions.daemonVersion;
 	fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, '\t')}\n`);
-	console.log(`Updated extension/package.json to ${versions.extensionVersion}`);
+	console.log(`Updated extension/package.json to ${versions.extensionVersion} and daemonVersion to ${versions.daemonVersion}`);
 }
 
 if (brainTs === nextBrainTs) {

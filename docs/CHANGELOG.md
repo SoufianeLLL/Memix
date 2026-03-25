@@ -4,7 +4,21 @@ All notable changes to the "memix" extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-Here's the markdown to add at the top of your changelog entries, above whatever the previous most recent version was:
+---
+
+## [1.2.0-beta] (Daemon: 0.5.0-beta) — 2026-03-25
+### Fixed
+- **Scan Patterns Route:** Fixed 404 error when clicking "Scan Patterns" button - route was `/observer/patterns` but client called `/api/v1/observer/patterns`.
+- **Brain File Location:** Fixed daemon writing brain files to wrong directory - `data_dir` now resolves to absolute path using workspace root.
+- **.env Loading Order:** Fixed daemon not loading workspace `.env` early enough, causing `MEMIX_WORKSPACE_ROOT` to be unset.
+- **Windsurf Rules Format:** Changed from single `.windsurfrules` file to `.windsurf/rules/*.md` directory format (matches Cursor pattern).
+- **Claude Code Rules:** Changed from `CLAUDE.md` to `.claude/rules/memix.md` directory format.
+- **Next.js Dev Noise:** Added exclusion patterns to file watcher (`.next/dev`, `node_modules`, `.git`, `target`, etc.) to prevent build artifacts from polluting timeline.
+- **UI Performance:** Parallelized independent API calls in `sendUpdate()` to reduce button response latency.
+- **Rules Templates:** Shortened brain and guard rule templates while preserving all core concepts (~300 lines → ~90 lines combined).
+
+### Changed
+- **Rules Directory Structure:** Windsurf and Claude Code now use dedicated rules directories instead of single files in root.
 
 ---
 
