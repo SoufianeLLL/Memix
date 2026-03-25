@@ -34,16 +34,16 @@ impl IdeRulesConfig {
             },
             IdeType::Windsurf => Self {
                 ide,
-                rules_dir: ".".to_string(),
-                rules_file: ".windsurfrules".to_string(),
-                guard_file: ".windsurfrules-guard".to_string(),
-                supports_multiple_files: false,
+                rules_dir: ".windsurf/rules".to_string(),
+                rules_file: "memix.md".to_string(),
+                guard_file: "memix-guard.md".to_string(),
+                supports_multiple_files: true,
             },
             IdeType::ClaudeCode => Self {
                 ide,
-                rules_dir: ".".to_string(),
-                rules_file: "CLAUDE.md".to_string(),
-                guard_file: "CLAUDE-GUARD.md".to_string(),
+                rules_dir: ".claude/rules".to_string(),
+                rules_file: "memix.md".to_string(),
+                guard_file: "memix-guard.md".to_string(),
                 supports_multiple_files: true,
             },
             IdeType::Antigravity => Self {
@@ -133,22 +133,11 @@ Every upsert object MUST include "project_id" as a field inside the object itsel
 matching the top-level project_id. Example of a correct upsert:
 
 JSON Format:
-{{
-  "id": "session_state",
-  "project_id": "PROJECT_ID_HERE",
-  "kind": "context",
-  "source": "agent_extracted",
-  "content": "{{ ...COMPLETE merged JSON string, not partial... }}",
-  "tags": ["session"]
-}}
+{{ "id": "session_state", "project_id": "PROJECT_ID_HERE", "kind": "context", "source": "agent_extracted", "content": "{{ COMPLETE merged JSON string, not partial... }}", "tags": ["session"] }}
 
 Schema for the full pending.json:
 JSON Format:
-{{
-  "project_id": "<PROJECT_ID>",
-  "upserts": [ <complete MemoryEntry objects as above> ],
-  "deletes": [ "<entry_id>" ]
-}}
+{{ "project_id": "<PROJECT_ID>", "upserts": [ <complete MemoryEntry objects as above> ], "deletes": [ "<entry_id>" ] }}
 
 After the daemon merges the update, it will clear `pending.json`
 and may write `.memix/brain/pending.ack.json` to confirm success.
@@ -159,13 +148,7 @@ All updates append/update, never delete unless specified.
 ### 'identity.json' – what the project IS (rare changes)
 Update: Only when project scope fundamentally changes.
 JSON Format:
-{{
-  "name": "My App",
-  "purpose": "SaaS for invoice management",
-  "tech_stack": ["Next.js", "TypeScript", "Prisma"],
-  "architecture": "App Router, Server Components",
-  "repo_structure": {{ "src/app/": "pages", "src/components/": "React" }}
-}}
+{{ "name": "My App", "purpose": "SaaS for invoice management", "tech_stack": ["Next.js", "TypeScript", "Prisma"], "architecture": "App Router, Server Components", "repo_structure": {{ "src/app/": "pages", "src/components/": "React" }} }}
 
 ### 'session_state.json' – current work snapshot
 Update: After EVERY completed task or significant progress.
@@ -173,57 +156,27 @@ Merge rule: Always read .memix/brain/session_state.json first. Keep all existing
 (progress history, blockers, modified_files, next_steps). Only update the fields relevant
 to this task. Append to arrays rather than replacing them.
 JSON Format:
-{{
-  "last_updated": "2026-02-28T14:30:00Z",
-  "session_number": 12,
-  "current_task": "PDF export",
-  "progress": ["Created pdf.ts", "Added API route"],
-  "blockers": ["Multi‑page layout broken"],
-  "next_steps": ["Fix layout", "Add tests"],
-  "modified_files": ["src/lib/pdf.ts", "src/app/api/export/route.ts"],
-  "important_context": "Use jsPDF, not Puppeteer"
-}}
+{{ "last_updated": "2026-02-28T14:30:00Z", "session_number": 12, "current_task": "PDF export", "progress": ["Created pdf.ts", "Added API route"], "blockers": ["Multi‑page layout broken"], "next_steps": ["Fix layout", "Add tests"], "modified_files": ["src/lib/pdf.ts", "src/app/api/export/route.ts"], "important_context": "Use jsPDF, not Puppeteer" }}
 
 ### 'decisions.json' – WHY we chose X over Y. Prevents re-debating solved problems.
 Update: Append new entries. NEVER delete old ones.
 JSON Format:
-[
-  {{
-    "date": "2026-01-18",
-    "decision": "Use jsPDF",
-    "reason": "Lightweight, serverless friendly",
-    "alternatives_considered": ["Puppeteer", "react-pdf"]
-  }}
-]
+{{ "date": "2026-01-18", "decision": "Use jsPDF", "reason": "Lightweight, serverless friendly", "alternatives_considered": ["Puppeteer", "react-pdf"] }}
 
 ### 'patterns.json' – project conventions & preferences
 Update: When new patterns are established or user corrects the AI.
 JSON Format:
-{{
-  "code_style": ["Use 'use server' in separate files", "Result pattern"],
-  "naming": ["Components: PascalCase", "Utilities: camelCase"],
-  "preferences": ["User hates try/catch", "Verbose comments for complex logic"]
-}}
+{{ "code_style": ["Use 'use server' in separate files", "Result pattern"], "naming": ["Components: PascalCase", "Utilities: camelCase"], "preferences": ["User hates try/catch", "Verbose comments for complex logic"] }}
 
 ### 'file_map.json' – What key files do so the AI doesn't need to re-read them.
 Update: When significant files are created or changed.
 JSON Format:
-{{
-  "src/lib/pdf.ts": "jsPDF generator, exports generateInvoicePDF()",
-  "src/lib/auth.ts": "NextAuth config with GitHub/Google"
-}}
+{{ "src/lib/pdf.ts": "jsPDF generator, exports generateInvoicePDF()", "src/lib/auth.ts": "NextAuth config with GitHub/Google" }}
 
 ### 'known_issues.json' – bugs & tech debt & warnings
 Update: When issues are discovered or resolved.
 JSON Format:
-[
-  {{
-    "status": "OPEN",
-    "issue": "PDF layout breaks >20 items",
-    "file": "src/lib/pdf.ts",
-    "notes": "Need page breaks"
-  }}
-]
+[{{ "status": "OPEN", "issue": "PDF layout breaks >20 items", "file": "src/lib/pdf.ts", "notes": "Need page breaks" }}]
 
 ### 'tasks.json' – persistent task tracker - never get lost
 Update: When tasks are created, started, completed, or blocked.
@@ -236,24 +189,7 @@ Update: When tasks are created, started, completed, or blocked.
 - When creating a new task list, set it as current_list and ADD tasks to the lists array
 
 JSON Format:
-{{
-  "current_list": "Sprint 3 – Auth & Payments",
-  "lists": [
-    {{
-      "name": "Sprint 3 – Auth & Payments",
-      "created": "2026-03-05T01:00:00Z",
-      "tasks": [
-        {{
-          "id": "t1",
-          "title": "Create login page",
-          "status": "completed",
-          "created": "2026-03-05T01:00:00Z",
-          "completed_at": "2026-03-05T01:45:00Z"
-        }}
-      ]
-    }}
-  ]
-}}
+{{ "current_list": "Sprint 3 – Auth & Payments", "lists": [ {{ "name": "Sprint 3 – Auth & Payments", "created": "...", "tasks": [ {{ "id": "t1", "title": "Create login page", "status": "completed", "created": "...", "completed_at": "..." }} ] }} ] }}
 - **IDs:** permanent, unique (t1, t2, …).
 - **Statuses:** pending → in_progress → completed | blocked.
 - **Transitions:** update status, add 'completed_at' or 'blocked_reason'.
@@ -287,14 +223,7 @@ When the user creates a NEW task list (e.g., new sprint, new feature plan):
 ### 'session_log.json' – historical session record
 Update: End of each session — append, never overwrite.
 JSON Format:
-[
-  {{
-    "session": 11,
-    "date": "2025-01-14",
-    "summary": "Built invoice CRUD.",
-    "files_changed": ["src/actions/invoice.ts", "src/components/InvoiceForm.tsx"]
-  }}
-]
+[{{ "session": 11, "date": "2025-01-14", "summary": "Built invoice CRUD.", "files_changed": ["src/actions/invoice.ts", "src/components/InvoiceForm.tsx"] }}]
 
 ## AUTO‑SAVE PROTOCOL
 Update automatically at these triggers (confirm with **Brain updated:** [file] —[change]):
@@ -364,16 +293,7 @@ In 'file_map.json', optionally include 'depended_on_by' and 'warning'. Before mo
 ## SESSION SCORING
 At 'end session', append to 'session_log.json' a summary object:
 JSON Format:
-{{
-  "session": 12,
-  "tasks_completed": 3,
-  "tasks_started": 1,
-  "bugs_found": 1,
-  "bugs_fixed": 0,
-  "decisions_made": 2,
-  "files_modified": 5,
-  "brain_updates": 8
-}}
+{{ "session": 12, "tasks_completed": 3, "tasks_started": 1, "bugs_found": 1, "bugs_fixed": 0, "decisions_made": 2, "files_modified": 5, "brain_updates": 8 }}
 
 ## COMPANION RULE
 This brain protocol has a companion enforcement file: **{guard_file}**
@@ -395,7 +315,6 @@ memix.md = what to do. memix-guard.md = how to enforce it. Both are mandatory."#
 >
 > If you have NOT read memix.md yet → STOP → read it first → return here.
 
-
 ## PRIME DIRECTIVE
 Before writing ANY response, complete this internal checklist:
 
@@ -410,7 +329,6 @@ Before writing ANY response, complete this internal checklist:
 If ANY answer is NO → fix it NOW before responding to the user.
 
 You do NOT respond until this checklist passes.
-
 
 ## MANDATORY RESPONSE FORMAT
 Every single response you write MUST end with this footer:
@@ -436,7 +354,6 @@ It keeps the brain protocol alive throughout the entire session.
 
 A response before this footer is BROKEN and INCOMPLETE.
 
-
 ## ERROR RECOVERY
 If an error occurs, if generation stops, if ANYTHING interrupts you:
 
@@ -451,7 +368,6 @@ Your FIRST action is:
 
 The user should NEVER have to remind you about the brain.
 If they remind you, you have failed. Recover immediately.
-
 
 ## ANTI-DRIFT REINFORCEMENT
 As conversations get longer, you tend to forget instructions from rule files.
@@ -479,12 +395,10 @@ Core rules you are MOST likely to forget (re-read these carefully):
 If you have read this far, you understand the system.
 Now follow it perfectly.
 
-
 ## Session Refresh
 
 If rules seem outdated or at the start of a complex task, tell me:
 "Please refresh your context by re-reading all rule files in .agents/rules/**"
-
 
 ## FINAL INSTRUCTION
 This is the last thing you read before responding.
