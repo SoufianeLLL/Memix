@@ -549,7 +549,11 @@ function bootUi() {
 	// Start in empty mode until we have a definitive state
 	setEmptyState(false, false, 'Checking daemon + Redis...');
 	send('refresh', { showSpinner: false }, { silent: true });
-	setInterval(function() { send('refresh', { showSpinner: false }, { silent: true }); }, 45000);
+	setInterval(function() { 
+		if (document.visibilityState === 'visible') {
+			send('refresh', { showSpinner: false }, { silent: true }); 
+		}
+	}, 45000);
 }
 if (document.readyState === 'loading') {
 	document.addEventListener('DOMContentLoaded', bootUi);
@@ -1239,7 +1243,7 @@ window.addEventListener('message', function (e) {
 
 		var git = data.observerGit || null;
 		var gitRepo = byId('observer-git-repo');
-		if (gitRepo) gitRepo.textContent = git && git.repo_root ? git.repo_root : '—';
+		if (gitRepo) gitRepo.textContent = git && git.repo_root ? stripRoot(git.repo_root) : '—';
 		var gitAuthors = byId('observer-git-authors');
 		if (gitAuthors) {
 			var authors = git && Array.isArray(git.recent_authors) ? git.recent_authors : [];
@@ -1257,7 +1261,7 @@ window.addEventListener('message', function (e) {
 				for (var gi = 0; gi < Math.min(hotFiles.length, 4); gi++) {
 					var hf = hotFiles[gi] || {};
 					var touch = hf.last_touch && hf.last_touch.summary ? ' • ' + hf.last_touch.summary : '';
-					gh += '<div style="margin-bottom:6px"><div style="font-size:11px;line-height:1.3">' + escapeHtml(hf.file_path || '—') + ' <b>(' + (hf.churn_commits || 0) + ')</b></div><div style="font-size:10px;opacity:0.8">' + escapeHtml(touch.replace(/^ • /, '')) + '</div></div>';
+					gh += '<div style="margin-bottom:6px"><div class="w-full">[PATH] ' + escapeHtml(stripRoot(hf.file_path) || '—') + ' — ' + (hf.churn_commits || 0) + ')</div><div class="mutted">' + escapeHtml(touch.replace(/^ • /, '')) + '</div></div>';
 				}
 				gitHot.innerHTML = gh;
 			}
@@ -1284,7 +1288,7 @@ window.addEventListener('message', function (e) {
 			if (topFiles.length === 0) {
 				importanceTopFiles.innerHTML = '<div style="color:var(--vscode-descriptionForeground)">No load-bearing files yet</div>';
 			} else {
-				var ixHtml = '<div><div class="w-full">Load-bearing files</div></div>' + topFiles.slice(0, 5).map(function(item) {
+				var ixHtml = '<div><div class="w-full text-sm">Load-bearing files</div></div>' + topFiles.slice(0, 5).map(function(item) {
 					var score = Array.isArray(item) ? item[1] : 0;
 					var file = Array.isArray(item) ? item[0] : 'unknown';
 					return '<div class="stat"><span style="max-width:75%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">[PATH] ' +
@@ -1629,15 +1633,32 @@ window.addEventListener('message', function (e) {
 	}
 	
 	if (command === 'patternReport') {
+		// Hide loading spinner
+		hideLoading();
+		
 		var patterns = data.patterns || [];
 		var stats = byId('pattern-stats');
+		
+		// Show error if present
+		if (data.error) {
+			if (stats) {
+				stats.innerHTML = '<span style="color:#f48771">⚠️ ' + escapeHtml(data.error) + '</span>';
+			}
+			// Clear pattern lists
+			['patterns-known', 'patterns-framework', 'patterns-emergent'].forEach(function(id) {
+				var el = byId(id);
+				if (el) el.innerHTML = '';
+			});
+			return;
+		}
+		
 		if (stats) {
 			if (data.total_files_scanned > 0) {
 				stats.textContent = data.total_files_scanned + ' files · '
 					+ data.total_functions_analyzed + ' functions · '
 					+ data.scan_duration_ms + 'ms';
 			} else {
-				stats.textContent = '';
+				stats.innerHTML = '<span style="color:var(--vscode-descriptionForeground)">No files scanned — open a workspace folder first</span>';
 			}
 		}
 

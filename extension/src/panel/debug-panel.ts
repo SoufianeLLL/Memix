@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import { BrainManager } from '../core/brain';
 import { HealthMonitor } from '../core/health';
 import { ConflictHandler } from '../core/conflict';
-import { BRAIN_KEYS, BRAIN_KEY_SPECS, TAXONOMY_MAP } from '../utils/constants';
+import { BRAIN_KEYS, BRAIN_KEY_SPECS, TAXONOMY_MAP, MEMORY_TAXONOMY } from '../utils/constants';
 import { createPromptPack, PromptPackVariant } from '../utils/prompt-pack';
 import { detectIDE, getRulesConfig } from '../ide/detector';
 import { MemoryClient } from '../client';
@@ -48,6 +48,10 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 		if (this.workspaceRoot) {
 			this.conflicts = new ConflictHandler(brain, this.workspaceRoot);
 		}
+	}
+
+	public isVisible(): boolean {
+		return this._view?.visible || false;
 	}
 
 	setDaemonState(state: DaemonReadinessState) {
@@ -430,8 +434,7 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 							try {
 								const raw = fs.readFileSync(versionsPath, 'utf8');
 								const v = JSON.parse(raw);
-								daemonVer = JSON.stringify(v);
-								// if (daemonVer === 'unknown') daemonVer = v.daemonVersion || 'unknown';
+								if (daemonVer === 'unknown') daemonVer = v.daemonVersion || 'unknown';
 								extensionVer = v.extensionVersion || 'unknown';
 								const stat = fs.statSync(versionsPath);
 								const diffMs = Date.now() - new Date(stat.mtime).getTime();
@@ -455,11 +458,13 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 								if (fs.existsSync(pkgPath)) {
 									const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 									extensionVer = pkg.version || 'unknown';
+									daemonVer = pkg.daemonVersion || 'unknown';
 								} else {
 									const parentPkgPath = path.join(this.extensionUri.fsPath, '..', 'package.json');
 									if (fs.existsSync(parentPkgPath)) {
 										const pkg = JSON.parse(fs.readFileSync(parentPkgPath, 'utf8'));
 										extensionVer = pkg.version || 'unknown';
+										daemonVer = pkg.daemonVersion || 'unknown';
 									}
 								}
 							} catch { /* ignore */ }
@@ -584,9 +589,16 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 
 		try {
 			const includeAdvanced = options?.includeAdvanced !== false;
-			const allData = await this.brain.getAll();
 			const projectId = this.brain.getProjectId();
 			const activeFile = vscode.window.activeTextEditor?.document?.uri?.fsPath || '';
+			
+			// Parallelize independent API calls
+			const [allData, skeletonStats, redisStats] = await Promise.all([
+				this.brain.getAll(),
+				projectId ? MemoryClient.getSkeletonStats(projectId) : Promise.resolve(null),
+				MemoryClient.getRedisStats().catch(() => null)
+			]);
+			
 			const keys: Record<string, number> = {};
 			let totalBytes = 0;
 			for (const [k, v] of Object.entries(allData)) {
@@ -596,13 +608,10 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				totalBytes += size;
 			}
 
-			// Fetch skeleton stats to include in total size estimation
-			if (projectId) {
-				const skeletonStats = await MemoryClient.getSkeletonStats(projectId);
-				if (skeletonStats && typeof skeletonStats.size_bytes === 'number' && skeletonStats.size_bytes > 0) {
-					keys['memix-project_skeletons'] = skeletonStats.size_bytes;
-					totalBytes += skeletonStats.size_bytes;
-				}
+			// Add skeleton stats if available
+			if (skeletonStats && typeof skeletonStats.size_bytes === 'number' && skeletonStats.size_bytes > 0) {
+				keys[`${projectId}_skeletons`] = skeletonStats.size_bytes;
+				totalBytes += skeletonStats.size_bytes;
 			}
 
 			const sizeInfo = { totalBytes, keys };
@@ -620,22 +629,18 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				redisMaxBytes = redisMaxOverrideMb * 1024 * 1024;
 				redisMaxEstimated = false;
 			}
-			try {
-				const stats = await MemoryClient.getRedisStats();
-				if (stats && typeof stats.used_bytes === 'number') {
-					redisUsedBytes = stats.used_bytes;
+			if (redisStats) {
+				if (typeof redisStats.used_bytes === 'number') {
+					redisUsedBytes = redisStats.used_bytes;
 				}
 				if (redisMaxOverrideMb > 0) {
 					// override is authoritative
-				} else if (stats && typeof stats.max_bytes === 'number' && stats.max_bytes > 0) {
-					redisMaxBytes = stats.max_bytes;
-				} else if (stats && typeof stats.used_bytes === 'number' && stats.used_bytes > 0) {
-					// Some providers don't expose maxmemory via CONFIG/INFO; we still want a meaningful bar.
+				} else if (typeof redisStats.max_bytes === 'number' && redisStats.max_bytes > 0) {
+					redisMaxBytes = redisStats.max_bytes;
+				} else if (typeof redisStats.used_bytes === 'number' && redisStats.used_bytes > 0) {
 					redisMaxBytes = 30 * 1024 * 1024;
 					redisMaxEstimated = true;
 				}
-			} catch {
-				// ignore and keep fallback
 			}
 			if (!redisMaxBytes || redisMaxBytes <= 0) {
 				redisMaxBytes = 1;
@@ -661,7 +666,7 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 					label: spec?.label || k,
 					exists,
 					sizeBytes: sizeInfo.keys[k] || 0,
-					taxonomy: TAXONOMY_MAP[k] || '—',
+					taxonomy: TAXONOMY_MAP[k] || (k.endsWith('_skeletons') ? MEMORY_TAXONOMY.SEMANTIC : '—'),
 					tier,
 					description: spec?.description || '',
 					fixStrategy: spec?.fixStrategy || 'manual',
@@ -674,22 +679,15 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 
 			const promptPackData = createPromptPack(allData, this.promptPackVariant as PromptPackVariant);
 			const promptPack = promptPackData.text;
-			let promptPackTokens: number | null = null;
-			try {
-				promptPackTokens = (await MemoryClient.countTokens(promptPack)).tokens;
-			} catch {
-				promptPackTokens = null;
-			}
-
-			let isPaused = false;
-			try {
-				const healthResp = await DaemonManager.ping();
-				if (healthResp?.status === 'paused') {
-					isPaused = true;
-				}
-			} catch (e) {
-				// daemon might be down
-			}
+			
+			// Parallelize token counting and daemon ping
+			const [tokenResult, healthResp] = await Promise.all([
+				MemoryClient.countTokens(promptPack).catch(() => null),
+				DaemonManager.ping().catch(() => null)
+			]);
+			
+			const promptPackTokens = tokenResult?.tokens ?? null;
+			const isPaused = healthResp?.status === 'paused';
 
 			panelOutputChannel.appendLine(
 				`[Panel] keys=${Object.keys(sizeInfo.keys).length} ` +
@@ -835,7 +833,7 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 					: (proactiveEnvelope?.blast_radius || null);
 				causalChain = causalChainRes.status === 'fulfilled' ? causalChainRes.value : null;
 			}
-			if (includeAdvanced) {
+			if (includeAdvanced && isInitialized) {
 				const [promptOptimizationRes, modelPerformanceRes, developerProfileRes, hierarchyIdentityRes] = await Promise.allSettled([
 					MemoryClient.getPromptOptimization(projectId, inferredTaskType),
 					MemoryClient.getModelPerformance(projectId),
@@ -856,6 +854,16 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				if (!categories[tax]) { categories[tax] = { keys: [], size: 0 }; }
 				categories[tax].keys.push(key);
 				categories[tax].size += sizeInfo.keys[key] || 0;
+			}
+			// Handle dynamic skeleton key (projectId_skeletons)
+			for (const key of Object.keys(sizeInfo.keys)) {
+				if (key.endsWith('_skeletons')) {
+					if (!categories[MEMORY_TAXONOMY.SEMANTIC]) {
+						categories[MEMORY_TAXONOMY.SEMANTIC] = { keys: [], size: 0 };
+					}
+					categories[MEMORY_TAXONOMY.SEMANTIC].keys.push(key);
+					categories[MEMORY_TAXONOMY.SEMANTIC].size += sizeInfo.keys[key] || 0;
+				}
 			}
 
 			const tasksObject = allData[BRAIN_KEYS.TASKS] || {};
@@ -1317,11 +1325,13 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				<div id="compiled-context-summary" style="color:var(--vscode-descriptionForeground)">No compiled context</div>
 				<div id="compiled-context-sections" style="margin-top:6px"></div>
 			</div>
+			<!--
 			<div class="w-full py-8 px-3 border-b border-bottom">
 				<h3 class="text-base font-semibold mb-2 w-full">Proactive Risk</h3>
 				<div id="proactive-risk-summary" style="color:var(--vscode-descriptionForeground)">No risk signal</div>
 				<div id="proactive-risk-details" style="margin-top:6px"></div>
 			</div>
+			-->
 			<div class="w-full py-8 px-3 border-b border-bottom">
 				<h3 class="text-base font-semibold mb-2 w-full">Learning Layer</h3>
 				<div id="prompt-optimization-summary" style="color:var(--vscode-descriptionForeground)">No learning data</div>
