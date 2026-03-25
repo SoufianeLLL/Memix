@@ -111,11 +111,39 @@ pub fn load_config() -> anyhow::Result<AppConfig> {
 		}
 	}
 
-	// Force daemon-managed data dir into workspace-local .memix when workspace_root is present.
-	if let Some(root) = &app_config.workspace_root {
-		let workspace_memix = std::path::PathBuf::from(root).join(".memix");
-		app_config.data_dir = Some(workspace_memix.to_string_lossy().to_string());
-	}
+	// Determine data_dir for daemon-managed files (token_lifetime.json, embeddings, etc.)
+	// Priority:
+	// 1. If workspace_root is set, use {workspace_root}/.memix/ (workspace-local, preferred)
+	// 2. If project_id is set, use ~/.memix/projects/{project_id}/ (project-specific, global location)
+	// 3. Fall back to .memix in current directory
+	//
+	// This ensures daemon files go to the project folder when workspace_root is configured.
+	// IMPORTANT: Always resolve to absolute path so it works regardless of CWD.
+	let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+	let resolved_data_dir: std::path::PathBuf = if let Some(root) = &app_config.workspace_root {
+		// Use workspace-local .memix (preferred when workspace_root is set)
+		std::path::PathBuf::from(root).join(".memix")
+	} else if let Some(pid) = &app_config.project_id {
+		// Fall back to project-specific directory under ~/.memix/projects/{project_id}/
+		home.join(".memix").join("projects").join(pid)
+	} else {
+		// Default to .memix in current directory - canonicalize to absolute
+		std::path::PathBuf::from(".memix")
+	};
+	
+	// Canonicalize to absolute path (handles relative paths correctly)
+	let absolute_data_dir = if resolved_data_dir.is_absolute() {
+		resolved_data_dir
+	} else {
+		std::fs::canonicalize(&resolved_data_dir).unwrap_or_else(|_| {
+			// If path doesn't exist yet, make it absolute manually
+			std::env::current_dir()
+				.unwrap_or_else(|_| std::path::PathBuf::from("."))
+				.join(&resolved_data_dir)
+		})
+	};
+	
+	app_config.data_dir = Some(absolute_data_dir.to_string_lossy().to_string());
 
     Ok(app_config)
 }

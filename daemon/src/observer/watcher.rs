@@ -1,9 +1,27 @@
-use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher, event::EventKind};
 use std::path::Path;
 use std::sync::mpsc::channel;
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 use tracing::{info, error};
+
+// Directories to exclude from watching - these generate noise, not signal
+const EXCLUDE_PATTERNS: &[&str] = &[
+    ".next/dev",      // Next.js dev builds (high churn, no signal)
+    "node_modules",   // Dependencies
+    ".git",           // Git internals
+    "target",         // Rust build artifacts
+    "dist", "build",  // Build outputs
+    ".cache",         // Cache directories
+    "__pycache__",    // Python cache
+    ".venv", "venv",  // Python virtual environments
+    "vendor",         // Vendored dependencies
+];
+
+fn should_exclude(path: &Path) -> bool {
+    let path_str = path.to_string_lossy();
+    EXCLUDE_PATTERNS.iter().any(|pattern| path_str.contains(pattern))
+}
 
 pub async fn start_watcher(workspace_root: String, tx: Sender<Event>) -> anyhow::Result<()> {
     // We use a standard std::sync::mpsc channel for the notify callback,
@@ -12,8 +30,16 @@ pub async fn start_watcher(workspace_root: String, tx: Sender<Event>) -> anyhow:
 
     // Create the watcher
     let mut watcher = RecommendedWatcher::new(
-        move |res| {
+        move |res: Result<Event, _>| {
             if let Ok(event) = res {
+                // Filter out noise directories
+                if event.paths.iter().any(|p| should_exclude(p)) {
+                    return;
+                }
+                // Filter out low-value events
+                if matches!(event.kind, EventKind::Any | EventKind::Other) {
+                    return;
+                }
                 let _ = std_tx.send(event);
             }
         },

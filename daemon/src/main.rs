@@ -611,7 +611,16 @@ fn acquire_daemon_lock() -> anyhow::Result<Option<std::fs::File>> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-	// 1. Prioritize .env from workspace root if provided
+	// Install rustls crypto provider first - required before any TLS operations
+	rustls::crypto::ring::default_provider()
+		.install_default()
+		.expect("Failed to install rustls crypto provider");
+
+	// 1. Load .env from current directory first (daemon/.env when running locally)
+	// This sets MEMIX_WORKSPACE_ROOT and other vars BEFORE we check them
+	let _ = dotenvy::dotenv();
+	
+	// 2. Also try loading from workspace root if specified (for project-specific overrides)
 	if let Ok(root) = std::env::var("MEMIX_WORKSPACE_ROOT") {
 		let env_path = std::path::Path::new(&root).join(".env");
 		if env_path.exists() {
@@ -619,10 +628,8 @@ async fn main() -> anyhow::Result<()> {
 		}
 	}
 	
-	// 2. Fallback to standard dotenv or explicit relative path
-	if dotenvy::dotenv().is_err() {
-		let _ = dotenvy::from_filename("../extension/.env");
-	}
+	// 3. Fallback to extension .env for dev convenience
+	let _ = dotenvy::from_filename("../extension/.env");
 
     // Initialize structured logging
     tracing_subscriber::fmt()
@@ -721,6 +728,7 @@ async fn main() -> anyhow::Result<()> {
 		agent_runtime.clone(),
 		git_insights.clone(),
 		app_config.workspace_root.clone(),
+		app_config.project_id.clone(),
 		app_config.team_id.clone(),
 		team_actor_id,
 		app_config.team_secret.clone(),

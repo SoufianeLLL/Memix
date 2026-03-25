@@ -44,6 +44,9 @@ pub struct AppState {
 	pub agent_runtime: Arc<tokio::sync::Mutex<AgentRuntime>>,
 	pub git_insights: Arc<tokio::sync::Mutex<ProjectGitInsights>>,
 	pub workspace_root: Option<String>,
+	/// The active project ID - all daemon operations are scoped to this project only.
+	/// Prevents cross-project Redis queries and ensures data isolation.
+	pub active_project_id: Option<String>,
 	pub configured_team_id: Option<String>,
 	pub configured_team_actor_id: String,
 	pub configured_team_secret: Option<String>,
@@ -145,14 +148,18 @@ pub async fn get_patterns(
     // workspace_root must be set — patterns analysis requires a directory to walk.
     // Return a clean empty report rather than crashing if the daemon has no workspace.
     let Some(root) = state.workspace_root.as_deref() else {
+        tracing::warn!("Scan Patterns called but workspace_root is not set");
         return Json(serde_json::json!({
             "patterns": [],
             "total_files_scanned": 0,
             "total_functions_analyzed": 0,
-            "scan_duration_ms": 0
+            "scan_duration_ms": 0,
+            "error": "workspace_root not configured - set MEMIX_WORKSPACE_ROOT or open a workspace folder"
         })).into_response();
     };
 
+    tracing::info!("Starting pattern scan for workspace: {}", root);
+    
     // PatternEngine::analyze is CPU-heavy (walks the entire workspace + parses every file).
     // Wrap it in spawn_blocking so it never stalls the async executor.
     let root_path = std::path::PathBuf::from(root);
@@ -161,7 +168,11 @@ pub async fn get_patterns(
     }).await;
 
     match report {
-        Ok(r) => Json(serde_json::to_value(r).unwrap_or_default()).into_response(),
+        Ok(r) => {
+            tracing::info!("Pattern scan complete: {} files, {} functions, {} patterns found", 
+                r.total_files_scanned, r.total_functions_analyzed, r.patterns.len());
+            Json(serde_json::to_value(r).unwrap_or_default()).into_response()
+        }
         Err(e) => {
             tracing::error!("Pattern scan task failed: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Pattern scan failed").into_response()
@@ -329,6 +340,7 @@ pub fn build_router(
     agent_runtime: Arc<tokio::sync::Mutex<AgentRuntime>>,
     git_insights: Arc<tokio::sync::Mutex<ProjectGitInsights>>,
     workspace_root: Option<String>,
+    active_project_id: Option<String>,
     configured_team_id: Option<String>,
     configured_team_actor_id: String,
     configured_team_secret: Option<String>,
@@ -347,6 +359,7 @@ pub fn build_router(
         agent_runtime,
         git_insights,
         workspace_root,
+        active_project_id,
         configured_team_id,
         configured_team_actor_id,
         configured_team_secret,
@@ -435,7 +448,7 @@ pub fn build_router(
         .route("/api/v1/tokens/record", post(record_ai_token_use))
 
 		// Observer patterns
-		.route("/observer/patterns", get(get_patterns))
+		.route("/api/v1/observer/patterns", get(get_patterns))
 
         .with_state(shared_state)
 }
@@ -1153,7 +1166,7 @@ async fn purge_project(
 async fn daemon_status() -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "status": "healthy",
-        "version": "0.4.0-beta",
+        "version": "0.5.0-beta",
         "features": [
             "autonomous_watching",
             "semantic_diff",
@@ -1427,17 +1440,33 @@ async fn get_model_performance(
 	(StatusCode::OK, Json(PromptOptimizer::model_performance(&records))).into_response()
 }
 
+/// Get developer profile aggregated across projects.
+/// When an active_project_id is set, only queries that project (no cross-project calls).
+/// When no active project is set, falls back to querying all projects (legacy behavior).
 async fn get_developer_profile(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-	let projects = match state.storage.list_projects().await {
-		Ok(projects) => projects,
-		Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-	};
 	let mut entries_by_project = HashMap::new();
-	for project in projects {
-		if let Ok(entries) = state.storage.get_entries(&project).await {
-			entries_by_project.insert(project, entries);
+	
+	// Only query the active project if set - prevents cross-project Redis calls
+	if let Some(ref active_project) = state.active_project_id {
+		match state.storage.get_entries(active_project).await {
+			Ok(entries) => {
+				entries_by_project.insert(active_project.clone(), entries);
+			}
+			Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+		}
+	} else {
+		// Legacy behavior: query all projects (only when no active project configured)
+		let projects = match state.storage.list_projects().await {
+			Ok(projects) => projects,
+			Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+		};
+		for project in projects {
+			if let Ok(entries) = state.storage.get_entries(&project).await {
+				entries_by_project.insert(project, entries);
+			}
 		}
 	}
+	
 	(StatusCode::OK, Json(CrossProjectLearner::compute_developer_profile(&entries_by_project))).into_response()
 }
 
