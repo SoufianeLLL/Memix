@@ -6,10 +6,31 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ---
 
+## [1.4.0-beta] (Daemon: 0.7.0-beta) — 2026-03-26
+### Added
+- **Context Orchestrator Refinements:** Major improvements to context relevance and accuracy.
+  - **Query-Aware Rules Pruning:** Rules files now match against query terms, not just task-type keywords. Sections containing query terms get +0–10 priority boost.
+  - **AGENTS.md Exclusion:** Generic AI instruction files are now excluded from context compilation. They are agent prompts, not project-specific conventions.
+  - **Global GENERATED_DIRS Constant:** 150+ generated directory patterns consolidated into `daemon/src/constants.rs` for consistent filtering across indexer and compiler.
+  - **Context Orchestrator Documentation:** New `docs/CONTEXT_ORCHESTRATOR.md` documenting architecture, query-aware selection, and output format.
+
+### Fixed
+- **Intelligence Metrics:** Decisions and Patterns now correctly persist and display in debug panel.
+  - Decisions stored as JSON array under `decisions.json` key.
+  - Patterns persisted to `patterns.json` after scan.
+- **Session State Auto-Tracking:** `session_state.json` now auto-updates with modified files on every file save.
+- **Skeleton Index Filtering:** `.next/` and other generated directories now correctly excluded from background indexer using unified GENERATED_DIRS constant.
+
+### Changed
+- **Rules File Candidates:** Now includes `.cursorrules`, `.github/copilot-instructions.md`, and `.rules/` directory patterns.
+- **Orchestrator Output:** Simplified header format to `MEMIX STRUCTURAL CONTEXT — {n} sections`.
+
+---
+
 ## [1.3.0-beta] (Daemon: 0.6.0-beta) — 2026-03-26
 ### Added
 - **Intelligent Decision Detection Engine:** World-class automated architectural decision recording system that observes code changes and automatically captures the "why" behind code evolution.
-  - **TOML-based Rule System:** 35+ configurable rules in `daemon/rules/decisions.toml` covering dependencies, structure, patterns, APIs, config, refactoring, testing, and documentation decisions. Hot-reloadable without recompilation.
+  - **TOML-based Rule System:** 70+ configurable rules in `daemon/rules/decisions.toml` covering dependencies, structure, patterns, APIs, config, refactoring, testing, and documentation decisions. Hot-reloadable without recompilation.
   - **AST Pattern Matching:** Tree-sitter queries detect singleton, repository, factory, middleware patterns directly from code structure.
   - **Embedding Similarity Detection:** Uses AllMiniLM-L6-v2 embeddings to detect patterns not covered by explicit rules (≥92% similarity threshold).
   - **Multi-Signal Processing:** Handles dependency additions, directory creation, file saves, moves, config changes, endpoint creation, git commits, and symbol renames.
