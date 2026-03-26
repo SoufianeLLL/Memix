@@ -30,6 +30,7 @@ let hasFirstState = false;
 let advancedHydrated = false;
 let hoverAnchor = null;
 let lastPromptPack = '';
+var lastEnhancedPrompt = '';
 let lastObserverDnaOtel = '';
 let lastHierarchyResolution = '';
 let activeModalKind = '';
@@ -461,6 +462,38 @@ function bootUi() {
 			send('scanPatterns', { showSpinner: true });
 		});
 	}
+
+	// Context Orchestrator — wired at module level so it survives DOM refreshes.
+	var btnOrchestrate = byId('btn-orchestrate');
+	if (btnOrchestrate) {
+		btnOrchestrate.addEventListener('click', function() {
+			var input = byId('orchestrate-input');
+			var prompt = input ? input.value.trim() : '';
+			if (!prompt) { return; }
+			var errEl = byId('orchestrate-error');
+			var loadEl = byId('orchestrate-loading');
+			var resEl = byId('orchestrate-result');
+			if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+			if (resEl) { resEl.style.display = 'none'; }
+			if (loadEl) { loadEl.style.display = 'block'; }
+			btnOrchestrate.disabled = true;
+			btnOrchestrate.textContent = '⚡ Analyzing…';
+			vscode.postMessage({ command: 'enhancePrompt', prompt: prompt });
+		});
+	}
+
+	document.addEventListener('click', function(e) {
+		if (e.target && e.target.id === 'btn-copy-enhanced') {
+			if (lastEnhancedPrompt) {
+				vscode.postMessage({ command: 'copyText', text: lastEnhancedPrompt, notice: 'Enhanced prompt copied to clipboard' });
+			}
+		}
+		if (e.target && e.target.id === 'btn-view-enhanced') {
+			if (lastEnhancedPrompt) {
+				vscode.postMessage({ command: 'openCenteredPayload', title: 'Enhanced Prompt', payload: lastEnhancedPrompt, subtitle: 'Compiled by Memix Context Orchestrator' });
+			}
+		}
+	});
 
 	document.addEventListener('keydown', function(e) {
 		if (e.key === 'Escape') closePayloadModal();
@@ -1292,7 +1325,7 @@ window.addEventListener('message', function (e) {
 				for (var gi = 0; gi < Math.min(hotFiles.length, 4); gi++) {
 					var hf = hotFiles[gi] || {};
 					var touch = hf.last_touch && hf.last_touch.summary ? ' • ' + hf.last_touch.summary : '';
-					gh += '<div style="margin-bottom:6px"><div class="w-full">[PATH] ' + escapeHtml(stripRoot(hf.file_path) || '—') + ' — ' + (hf.churn_commits || 0) + ')</div><div class="mutted">' + escapeHtml(touch.replace(/^ • /, '')) + '</div></div>';
+					gh += '<div style="margin-bottom:6px"><div class="w-full">[PATH] ' + escapeHtml(stripRoot(hf.file_path) || '—') + ' — ' + (hf.churn_commits || 0) + ')</div><div class="muted">' + escapeHtml(touch.replace(/^ • /, '')) + '</div></div>';
 				}
 				gitHot.innerHTML = gh;
 			}
@@ -1701,4 +1734,48 @@ window.addEventListener('message', function (e) {
 		renderPatternGroup('patterns-framework', 'Framework Patterns', '', framework);
 		renderPatternGroup('patterns-emergent',  'Emergent Patterns',  '', emergent);
 	}
+
+	if (command === 'orchestrateResult') {
+        var loadEl2 = byId('orchestrate-loading');
+        var btnOrch = byId('btn-orchestrate');
+        if (loadEl2) { loadEl2.style.display = 'none'; }
+        if (btnOrch) { btnOrch.disabled = false; btnOrch.textContent = 'Enhance with Memix'; }
+
+        lastEnhancedPrompt = data.enhanced_prompt || '';
+
+        var statsEl = byId('orchestrate-stats');
+        if (statsEl) {
+            var cr = typeof data.compression_ratio === 'number' ? data.compression_ratio.toFixed(1) : '?';
+            statsEl.innerHTML =
+                '<div class="stat"><span>Compression Ratio</span><span>' + cr + '×</span></div>' +
+                '<div class="stat"><span>Sections Used</span><span>' + (data.sections_used || 0) + '</span></div>' +
+                '<div class="stat"><span>Compiled Tokens</span><span>' + (data.compiled_tokens || 0).toLocaleString() + '</span></div>';
+        }
+
+        var filesEl = byId('orchestrate-files');
+        if (filesEl) {
+            var files = Array.isArray(data.relevant_files) ? data.relevant_files : [];
+            if (files.length > 0) {
+                filesEl.textContent = 'Relevant: ' + files.map(stripRoot).join(', ');
+            } else {
+                filesEl.textContent = '';
+            }
+        }
+
+        var resEl2 = byId('orchestrate-result');
+        if (resEl2) { resEl2.style.display = 'block'; }
+    }
+
+    if (command === 'orchestrateError') {
+        var loadEl3 = byId('orchestrate-loading');
+        var btnOrch2 = byId('btn-orchestrate');
+        if (loadEl3) { loadEl3.style.display = 'none'; }
+        if (btnOrch2) { btnOrch2.disabled = false; btnOrch2.textContent = '⚡ Enhance with Memix'; }
+
+        var errEl2 = byId('orchestrate-error');
+        if (errEl2) {
+            errEl2.textContent = data.message || 'Enhancement failed';
+            errEl2.style.display = 'block';
+        }
+    }
 });

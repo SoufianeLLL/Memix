@@ -34,7 +34,7 @@ The engine processes multiple signal types:
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  Layer 1: TOML Rules (Explicit)                                 │
-│  - 35+ pre-defined rules in daemon/rules/decisions.toml        │
+│  - 70+ pre-defined rules in daemon/rules/decisions.toml        │
 │  - Covers common patterns, frameworks, conventions              │
 │  - Hot-reloadable without daemon restart                        │
 ├─────────────────────────────────────────────────────────────────┤
