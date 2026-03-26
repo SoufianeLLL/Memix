@@ -164,7 +164,7 @@ impl TokenTracker {
     /// without blocking startup. Session counters are untouched.
     pub async fn load_lifetime_into(
         tracker: &Arc<TokenTracker>,
-        project_id: &str,
+        _project_id: &str,
         data_dir: &std::path::Path,
     ) -> anyhow::Result<()> {
         let lifetime_path = data_dir.join("token_lifetime.json");
