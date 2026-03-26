@@ -7,17 +7,6 @@ use tracing_subscriber;
 
 const BUNDLED_LICENSE_PUBLIC_KEY_DER: &[u8] = include_bytes!("../keys/memix_public.der");
 
-/// Strip the workspace root from an absolute path for display.
-/// Falls back to the full path if the root prefix doesn't match.
-fn display_path(absolute: &str, workspace_root: Option<&str>) -> String {
-    if let Some(root) = workspace_root {
-        if let Some(stripped) = absolute.strip_prefix(root) {
-            return stripped.trim_start_matches('/').to_string();
-        }
-    }
-    absolute.to_string()
-}
-
 fn install_panic_hook() {
 	std::panic::set_hook(Box::new(|panic_info| {
 		let payload = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
@@ -58,6 +47,7 @@ pub mod agents;
 pub mod context;
 pub mod learning;
 pub mod license;
+mod constants;
 
 use crate::agents::{AgentRuntime, FileSaveAgentContext, SessionStartContext};
 use crate::intelligence::autonomous::AutonomousPairProgrammer;
@@ -67,7 +57,7 @@ use crate::git::archaeologist::{GitArchaeologist, ProjectGitInsights};
 use crate::observer::call_graph::CallGraph;
 use crate::observer::differ::AstDiffer;
 use crate::observer::dna::{DnaRuleConfig, ProjectCodeDna};
-use crate::observer::decisions::{DecisionDetector, DecisionSignal, AstFeature};
+use crate::observer::decisions::{DecisionDetector, DecisionSignal};
 use crate::observer::imports::{extract_imports, signature_head};
 use crate::observer::parser::{AstNodeFeature, AstParser};
 use crate::recorder::flight::{FlightRecorder, SessionEvent};
@@ -1207,7 +1197,44 @@ async fn main() -> anyhow::Result<()> {
 							};
 							let decisions = decision_detector.process_signal(signal).await;
 							for decision in decisions {
-								let entry = DecisionDetector::to_memory_entry(&decision, &project_id_for_spawn);
+								// Append to the decisions array (BRAIN_KEYS.DECISIONS = "decisions.json")
+								// The panel expects an array at this key, not individual entries
+								let existing = storage_for_events.get_entry(&project_id_for_spawn, "decisions.json").await;
+								let mut arr: Vec<serde_json::Value> = match &existing {
+									Ok(e) if !e.content.is_empty() => {
+										serde_json::from_str(&e.content).unwrap_or_default()
+									},
+									_ => vec![],
+								};
+								arr.push(serde_json::json!({
+									"id": decision.id,
+									"title": decision.title,
+									"rationale": decision.rationale,
+									"alternatives": decision.alternatives,
+									"evidence": decision.evidence,
+									"confidence": decision.confidence,
+									"rule_id": decision.rule_id,
+									"triggered_by": decision.triggered_by,
+									"tags": decision.tags,
+									"created_at": decision.created_at,
+								}));
+								let entry = MemoryEntry {
+									id: "decisions.json".to_string(),
+									project_id: project_id_for_spawn.clone(),
+									kind: MemoryKind::Decision,
+									content: serde_json::to_string(&arr).unwrap_or_default(),
+									tags: vec!["decisions".to_string()],
+									source: MemorySource::AgentExtracted,
+									superseded_by: None,
+									contradicts: vec![],
+									parent_id: None,
+									caused_by: vec![],
+									enables: vec![],
+									created_at: decision.created_at,
+									updated_at: decision.created_at,
+									access_count: 0,
+									last_accessed_at: None,
+								};
 								match storage_for_events.upsert_entry(&project_id_for_spawn, entry).await {
 									Ok(_) => {
 										tracing::info!("Auto-decision recorded: {}", decision.title);
@@ -1312,7 +1339,7 @@ async fn main() -> anyhow::Result<()> {
 				// 3. There are genuine signature changes between the two versions.
 				// Without these guards, daemon startup floods the brain with false warnings
 				// because every file looks like it "changed" from empty to its current state.
-				if !old_bytes.is_empty() && !breaking_signatures.is_empty() {
+				if !old_bytes.is_empty() && !genuinely_breaking.is_empty() {
 					let now = Utc::now();
 					let details = breaking_signatures
 						.iter()
@@ -1479,6 +1506,54 @@ async fn main() -> anyhow::Result<()> {
 						}
 
 						tracing::debug!("Skeleton: FSI persisted for {} (hot={})", key, is_hot);
+					}
+				}
+
+				// ─── Auto-update session_state.json with modified files ──────────────────
+				// Track file modifications for session state without requiring explicit user action
+				{
+					if let Ok(existing) = storage_for_events.get_entry(&project_id_for_spawn, "session_state.json").await {
+						let mut state: serde_json::Value = if !existing.content.is_empty() {
+							serde_json::from_str(&existing.content).unwrap_or(serde_json::json!({}))
+						} else {
+							serde_json::json!({
+								"session_number": 1,
+								"current_task": "Development in progress",
+								"progress": [],
+								"modified_files": [],
+								"last_updated": chrono::Utc::now().to_rfc3339()
+							})
+						};
+						
+						// Append to modified_files if not already there
+						if let Some(files) = state.get_mut("modified_files") {
+							if let Some(arr) = files.as_array_mut() {
+								let key_val = serde_json::json!(key);
+								if !arr.contains(&key_val) {
+									arr.push(key_val);
+								}
+							}
+						}
+						state["last_updated"] = serde_json::json!(chrono::Utc::now().to_rfc3339());
+						
+						let entry = MemoryEntry {
+							id: "session_state.json".to_string(),
+							project_id: project_id_for_spawn.clone(),
+							kind: MemoryKind::Context,
+							content: serde_json::to_string(&state).unwrap_or_default(),
+							tags: vec!["session".to_string()],
+							source: MemorySource::AgentExtracted,
+							superseded_by: None,
+							contradicts: vec![],
+							parent_id: None,
+							caused_by: vec![],
+							enables: vec![],
+							created_at: chrono::Utc::now(),
+							updated_at: chrono::Utc::now(),
+							access_count: 0,
+							last_accessed_at: None,
+						};
+						let _ = storage_for_events.upsert_entry(&project_id_for_spawn, entry).await;
 					}
 				}
 

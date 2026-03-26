@@ -8,9 +8,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
 
-use crate::observer::call_graph::CallGraph;
+use walkdir::WalkDir;
+
+use crate::constants::GENERATED_DIRS;
+
 use crate::observer::embedding_store::EmbeddingStore;
 use crate::observer::parser::AstParser;
 use crate::observer::skeleton::FileSkeleton;
@@ -133,18 +135,24 @@ impl BackgroundIndexer {
 }
 
 fn collect_supported_files(root: &Path, limit: usize) -> Vec<PathBuf> {
-    let supported_extensions = ["ts", "tsx", "js", "jsx", "rs", "py", "go", "java",
+    const SUPPORTED_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "rs", "py", "go", "java",
                                  "kt", "swift", "cs", "cpp", "cc", "rb", "php"];
 
     let mut files = Vec::new();
-    let walker = walkdir::WalkDir::new(root)
+    let walker = WalkDir::new(root)
         .follow_links(false)
         .into_iter()
         .filter_entry(|entry| {
-            let name = entry.file_name().to_string_lossy();
-            // Skip directories that are noise, not signal
-            !matches!(name.as_ref(), "node_modules" | ".git" | "target" | "dist"
-                | "build" | ".next" | ".cache" | "__pycache__" | ".venv" | "vendor")
+            if entry.file_type().is_dir() {
+                // Check if directory name matches any generated dir pattern
+                let name = entry.file_name().to_string_lossy();
+                // GENERATED_DIRS uses "/name/" format, extract just the name part
+                return !GENERATED_DIRS.iter().any(|dir| {
+                    let dir_name = dir.trim_matches('/');
+                    name == dir_name || dir.contains(&format!("/{}/", name))
+                });
+            }
+            true
         });
 
     for entry in walker.filter_map(|e| e.ok()) {
@@ -155,7 +163,7 @@ fn collect_supported_files(root: &Path, limit: usize) -> Vec<PathBuf> {
             continue;
         }
         let ext = entry.path().extension().and_then(|e| e.to_str()).unwrap_or("");
-        if supported_extensions.contains(&ext) {
+        if SUPPORTED_EXTENSIONS.contains(&ext) {
             files.push(entry.path().to_path_buf());
         }
     }
