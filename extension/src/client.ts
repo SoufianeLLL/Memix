@@ -1522,4 +1522,75 @@ export class MemoryClient {
 			req.end();
 		});
 	}
+
+	// ─── Context Orchestrator ────────────────────────────────────────────────
+    static async orchestrate(req: {
+        prompt: string;
+        project_id: string;
+        active_file: string;
+        context_budget?: number;
+        task_type?: string;
+        max_depth?: number;
+    }): Promise<{
+        enhanced_prompt: string;
+        sections_used: number;
+        compiled_tokens: number;
+        naive_estimate: number;
+        compression_ratio: number;
+        relevant_files: string[];
+        compilation_summary: string;
+    }> {
+        return new Promise((resolve, reject) => {
+            const payload = JSON.stringify(req);
+            const requestPath = `${API_PREFIX}/orchestrate`;
+            const options: http.RequestOptions = {
+                ...getRequestOptions('POST', requestPath),
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(payload),
+                },
+            };
+            const httpReq = http.request(options, (res) => {
+                readResponseBody(res).then((data) => {
+                    if ((res.statusCode ?? 500) >= 400) {
+                        buildDaemonError(res, requestPath).then(reject, reject);
+                        return;
+                    }
+                    try {
+                        resolve(JSON.parse(data || '{}'));
+                    } catch (e) {
+                        reject(e);
+                    }
+                }, reject);
+            });
+            httpReq.on('error', reject);
+            httpReq.write(payload);
+            httpReq.end();
+        });
+    }
+
+    // ─── Skeleton Index Management ──────────────────────────────────────────
+    static async purgeSkeleton(projectId: string): Promise<{ success: boolean; entries_purged: number }> {
+        return new Promise((resolve, reject) => {
+            const requestPath = `${API_PREFIX}/skeleton/purge/${projectId}`;
+            const options: http.RequestOptions = {
+                ...getRequestOptions('POST', requestPath),
+            };
+            const httpReq = http.request(options, (res) => {
+                readResponseBody(res).then((data) => {
+                    if ((res.statusCode ?? 500) >= 400) {
+                        buildDaemonError(res, requestPath).then(reject, reject);
+                        return;
+                    }
+                    try {
+                        resolve(JSON.parse(data || '{}'));
+                    } catch (e) {
+                        reject(e);
+                    }
+                }, reject);
+            });
+            httpReq.on('error', reject);
+            httpReq.end();
+        });
+    }
 }

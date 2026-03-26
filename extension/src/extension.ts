@@ -642,6 +642,27 @@ export async function activate(context: vscode.ExtensionContext) {
 		})
 	);
 
+	// Clear Skeleton Index
+	context.subscriptions.push(
+		vscode.commands.registerCommand('memix.clearSkeleton', async () => {
+			if (!(await ensureDaemonReady())) { return; }
+			if (!requireWorkspace()) { return; }
+			const confirm = await vscode.window.showWarningMessage(
+				'Clear skeleton index? This removes all FSI/FuSI entries and embeddings. The index will rebuild on next daemon restart.',
+				'Yes, clear',
+				'Cancel'
+			);
+			if (confirm !== 'Yes, clear') { return; }
+			try {
+				const result = await MemoryClient.purgeSkeleton(brain.getProjectId());
+				vscode.window.showInformationMessage(`Memix: Cleared ${result.entries_purged} skeleton entries.`);
+				panelProvider?.sendUpdate();
+			} catch (err: any) {
+				vscode.window.showErrorMessage(`Memix clear skeleton failed: ${err.message}`);
+			}
+		})
+	);
+
 	// Recover Corrupted Brain
 	context.subscriptions.push(
 		vscode.commands.registerCommand('memix.recoverBrain', async () => {

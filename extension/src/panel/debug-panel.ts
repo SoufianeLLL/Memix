@@ -208,6 +208,41 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 						await this.sendPatternUpdate();
 					}, { refreshAfter: false });
 					break;
+				case 'enhancePrompt': {
+					if (!this.brain) { return; }
+					const rawPrompt = typeof msg.prompt === 'string' ? msg.prompt.trim() : '';
+					if (!rawPrompt) { return; }
+					try {
+						const activeFile = vscode.window.activeTextEditor?.document?.uri?.fsPath ?? '';
+						const projectId = this.brain.getProjectId();
+						const observerIntent = (await MemoryClient.getObserverIntent().catch(() => null))?.intent_type;
+						const inferredTask = observerIntent === 'bug_fixing' ? 'bugfix'
+							: observerIntent === 'refactoring' ? 'refactor'
+								: observerIntent === 'scaffolding' ? 'new_feature'
+									: 'code_review';
+						// Infer task type from active observer intent if available,
+						// falling back to code_review since that's the most common
+						// context for an explicit orchestrate request.
+						const result = await MemoryClient.orchestrate({
+							prompt: rawPrompt,
+							project_id: projectId,
+							active_file: activeFile,
+							context_budget: 3000,
+							task_type: inferredTask,
+							max_depth: 3,
+						});
+						this._view?.webview.postMessage({
+							command: 'orchestrateResult',
+							data: result,
+						});
+					} catch (err: any) {
+						this._view?.webview.postMessage({
+							command: 'orchestrateError',
+							message: err?.message ?? 'Enhancement failed',
+						});
+					}
+					break;
+				}
 				case 'refresh':
 					if (!msg?.silent) {
 						this.postLoading('Refreshing data...');
@@ -1207,6 +1242,34 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 					<span>Lifetime Saved</span>
 					<span id="token-lifetime-saved" class="stat-value">—</span>
 				</div>
+			</div>
+			<div class="w-full py-8 px-3 border-b border-bottom">
+				<h3 class="text-base font-semibold mb-2 w-full flex items-center gap-x-2">
+					<span>⚡</span><span>Context Orchestrator</span>
+				</h3>
+				<div class="text-muted mb-2">
+					Type a question and Memix enriches it with precise structural context —
+					eliminating AI tool-call discovery so the AI answers in one shot.
+				</div>
+				<textarea
+					id="orchestrate-input"
+					class="w-full border-none rounded-none p-2 text-xs resize-none focus:ring-0 focus:outline-none"
+					placeholder="e.g. Why is my license validation failing?"
+					style="background:var(--vscode-input-background);color:var(--vscode-input-foreground);"
+				></textarea>
+				<div style="margin-top:6px">
+					<button id="btn-orchestrate" class="action-btn w-full">Enhance with Memix</button>
+				</div>
+				<div id="orchestrate-result" style="margin-top:8px;display:none">
+					<div id="orchestrate-stats"></div>
+					<div class="mt-3 flex items-center gap-x-2">
+						<button id="btn-copy-enhanced" class="action-btn w-full">Copy Prompt</button>
+						<button id="btn-view-enhanced" class="action-btn w-full">View Full</button>
+					</div>
+					<div id="orchestrate-files" style="font-size:10px;opacity:0.5;margin-top:6px;line-height:1.5"></div>
+				</div>
+				<div id="orchestrate-error" style="display:none;font-size:11px;color:var(--vscode-errorForeground);margin-top:6px"></div>
+				<div id="orchestrate-loading" style="display:none;font-size:11px;opacity:0.6;margin-top:6px">Analyzing codebase structure…</div>
 			</div>
 			<div class="w-full py-8 px-3 border-b border-bottom">
 				<h3 class="text-base font-semibold mb-2 w-full">Integrity & Freshness</h3>
