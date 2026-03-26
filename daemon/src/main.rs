@@ -67,6 +67,7 @@ use crate::git::archaeologist::{GitArchaeologist, ProjectGitInsights};
 use crate::observer::call_graph::CallGraph;
 use crate::observer::differ::AstDiffer;
 use crate::observer::dna::{DnaRuleConfig, ProjectCodeDna};
+use crate::observer::decisions::{DecisionDetector, DecisionSignal, AstFeature};
 use crate::observer::imports::{extract_imports, signature_head};
 use crate::observer::parser::{AstNodeFeature, AstParser};
 use crate::recorder::flight::{FlightRecorder, SessionEvent};
@@ -1109,6 +1110,9 @@ async fn main() -> anyhow::Result<()> {
 		let mut last_observer_persist = std::time::Instant::now();
 		let mut last_fsi_persist = std::time::Instant::now();
 		let mut recent_deleted_files: std::collections::VecDeque<String> = std::collections::VecDeque::with_capacity(32);
+		let mut decision_detector = DecisionDetector::new(
+			std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("rules")
+		);
 		let call_graph_for_events = call_graph.clone();
 		let workspace_root_for_events = app_config.workspace_root.clone().map(std::path::PathBuf::from);
 		fn fsi_debounce_secs() -> u64 {
@@ -1187,6 +1191,35 @@ async fn main() -> anyhow::Result<()> {
 				if !path.is_file() {
 					continue;
 				}
+
+				let key = path.to_string_lossy().to_string();
+
+				// Check for package.json changes - detect new dependencies
+				let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+				if file_name == "package.json" {
+					if let Some(ref root) = workspace_root_for_events {
+						let new_deps = crate::observer::decisions::detect_new_dependencies(root, decision_detector.get_previous_deps());
+						for (name, version) in new_deps {
+							let signal = DecisionSignal::DependencyAdded {
+								name: name.clone(),
+								version: version.clone(),
+								file: key.clone(),
+							};
+							let decisions = decision_detector.process_signal(signal).await;
+							for decision in decisions {
+								let entry = DecisionDetector::to_memory_entry(&decision, &project_id_for_spawn);
+								match storage_for_events.upsert_entry(&project_id_for_spawn, entry).await {
+									Ok(_) => {
+										tracing::info!("Auto-decision recorded: {}", decision.title);
+										decision_detector.mark_recorded(decision.id.clone()).await;
+									},
+									Err(e) => tracing::warn!("Failed to save auto-decision: {}", e),
+								}
+							}
+						}
+					}
+				}
+
 				let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 				if !AstParser::is_supported(ext) {
 					continue;
@@ -1205,7 +1238,6 @@ async fn main() -> anyhow::Result<()> {
 				};
 				let Some(new_tree) = new_tree else { continue; };
 
-				let key = path.to_string_lossy().to_string();
 				let (old_bytes, old_tree) = cache
 					.get(&key)
 					.cloned()

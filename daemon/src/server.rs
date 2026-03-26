@@ -450,6 +450,9 @@ pub fn build_router(
 		// Observer patterns
 		.route("/api/v1/observer/patterns", get(get_patterns))
 
+		// Decision feedback
+		.route("/api/v1/decisions/:decision_id/feedback", post(record_decision_feedback))
+
         .with_state(shared_state)
 }
 
@@ -1166,7 +1169,7 @@ async fn purge_project(
 async fn daemon_status() -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "status": "healthy",
-        "version": "0.5.0-beta",
+        "version": "0.6.0-beta",
         "features": [
             "autonomous_watching",
             "semantic_diff",
@@ -1673,6 +1676,92 @@ async fn get_token_stats(
     };
     
     (StatusCode::OK, Json(stats)).into_response()
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DECISION FEEDBACK - User feedback on auto-detected decisions
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#[derive(Deserialize)]
+struct DecisionFeedbackRequest {
+    /// "useful" or "dismissed" or "incorrect"
+    feedback: String,
+    /// Optional comment from user
+    comment: Option<String>,
+}
+
+#[derive(Serialize)]
+struct DecisionFeedbackResponse {
+    success: bool,
+    decision_id: String,
+    feedback: String,
+    message: String,
+}
+
+async fn record_decision_feedback(
+    Path(decision_id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<DecisionFeedbackRequest>,
+) -> impl IntoResponse {
+    let project_id = match &state.active_project_id {
+        Some(id) => id.clone(),
+        None => {
+            return (StatusCode::BAD_REQUEST, Json(DecisionFeedbackResponse {
+                success: false,
+                decision_id,
+                feedback: payload.feedback,
+                message: "No active project".to_string(),
+            })).into_response();
+        }
+    };
+
+    // Store feedback as a separate entry linked to the decision
+    let now = chrono::Utc::now();
+    let feedback_entry = MemoryEntry {
+        id: format!("feedback_{}_{}", decision_id, now.timestamp_millis()),
+        project_id: project_id.clone(),
+        kind: crate::brain::schema::MemoryKind::Fact,
+        content: serde_json::json!({
+            "type": "decision_feedback",
+            "decision_id": decision_id,
+            "feedback": payload.feedback,
+            "comment": payload.comment,
+            "timestamp": now.to_rfc3339(),
+        }).to_string(),
+        tags: vec!["feedback".to_string(), "decision".to_string(), payload.feedback.clone()],
+        source: crate::brain::schema::MemorySource::UserManual,
+        superseded_by: None,
+        contradicts: vec![],
+        parent_id: Some(decision_id.clone()),
+        caused_by: vec![],
+        enables: vec![],
+        created_at: now,
+        updated_at: now,
+        access_count: 0,
+        last_accessed_at: None,
+    };
+
+    match state.storage.upsert_entry(&project_id, feedback_entry).await {
+        Ok(_) => {
+            tracing::info!("Recorded feedback for decision {}: {}", decision_id, payload.feedback);
+            let feedback = payload.feedback.clone();
+            (StatusCode::OK, Json(DecisionFeedbackResponse {
+                success: true,
+                decision_id,
+                feedback: payload.feedback,
+                message: format!("Feedback '{}' recorded for decision", feedback),
+            })).into_response()
+        }
+        Err(e) => {
+            tracing::error!("Failed to record decision feedback: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(DecisionFeedbackResponse {
+                success: false,
+                decision_id,
+                feedback: payload.feedback,
+                message: format!("Failed to record feedback: {}", e),
+            })).into_response()
+        }
+    }
 }
 
 #[derive(Deserialize)]

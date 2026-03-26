@@ -6,8 +6,8 @@
   <a href="https://marketplace.visualstudio.com/items?itemName=digitalvizellc.memix"><img src="https://img.shields.io/visual-studio-marketplace/v/digitalvizellc.memix?label=VS%20Marketplace&color=0078D4&logo=visual-studio-code&style=for-the-badge" alt="VS Marketplace" /></a>
   <img src="https://img.shields.io/badge/BUILT WITH-RUST / REDIS / TYPSCRIPT-blue?style=for-the-badge" alt="Daemon version" />
   <img src="https://img.shields.io/badge/INTEGRATED MODELS-AllMiniLM--L6--v2-yellow?style=for-the-badge" alt="Daemon version" />
-  <a href="./daemon"><img src="https://img.shields.io/badge/daemon-v0.5.0--beta-emerald?style=for-the-badge" alt="Daemon version" /></a>
-  <a href="./extension"><img src="https://img.shields.io/badge/extension-v1.2.0--beta-orange?style=for-the-badge" alt="Extension version" /></a>
+  <a href="./daemon"><img src="https://img.shields.io/badge/daemon-v0.6.0--beta-emerald?style=for-the-badge" alt="Daemon version" /></a>
+  <a href="./extension"><img src="https://img.shields.io/badge/extension-v1.3.0--beta-orange?style=for-the-badge" alt="Extension version" /></a>
 </p>
 
 <h1 align="center">
@@ -98,6 +98,13 @@ Loads rules from `memix-security.toml` (workspace root, `.memix/` fallback, or `
 Computes a project-wide Code DNA summary from AST patterns across all supported languages: architecture style inference, hot and stable zone identification, circular dependency detection, type coverage ratio, language breakdown, and an explainability summary suitable for direct injection into AI context.
 
 ### Git Archaeology
+Maintains deep git history context: file churn analysis (identifies hot and stable zones), recent author tracking, commit summaries, and structural change patterns. Combined with Code DNA, this provides a complete picture of which areas need careful handling versus which are safe for aggressive refactoring.
+
+### Intelligent Decision Detection
+Automatically observes code changes and records architectural decisions — capturing the **why** behind code evolution, not just the **what**. Uses a three-layer detection system: TOML-based rules (35+ pre-defined), AST pattern matching (tree-sitter), and embedding similarity (AllMiniLM-L6-v2). Decisions are stored in the brain with evidence chains, confidence scores, and rule provenance. User feedback adjusts rule confidence over time for self-improving detection accuracy.
+
+### Decision Feedback Loop
+Users can provide feedback on auto-detected decisions through the API (`POST /api/v1/decisions/:id/feedback`). Feedback types include useful, dismissed, and incorrect. Rules automatically adjust confidence based on accumulated feedback, enabling the system to learn from user corrections and improve detection quality over time.
 Native git2 integration for tracking file churn and stability. Identifies hot files (frequently modified recently) and stable files (infrequently modified, low-risk to edit). Used as a signal in proactive risk scoring and as context for the intent engine.
 
 ### Learning Layer + Cross-Project Profile

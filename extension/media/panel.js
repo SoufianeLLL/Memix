@@ -9,15 +9,6 @@ document.addEventListener('click', function(e) {
         });
         return;
     }
-    while (target && target !== document.body) {
-        if (target.classList && target.classList.contains('brain-key-link')) {
-            e.preventDefault();
-            var keyName = target.getAttribute('data-key');
-            if (keyName) vscode.postMessage({ command: 'openBrainKey', key: keyName });
-            return;
-        }
-        target = target.parentNode;
-    }
 });
 
 
@@ -403,20 +394,6 @@ function bootUi() {
 		});
 	}
 
-	var variantSel = byId('prompt-pack-variant');
-	if (variantSel) {
-		variantSel.addEventListener('change', function() {
-			var v = variantSel.value;
-			if (v === 'Small' || v === 'Standard' || v === 'Deep') {
-				var pps = byId('prompt-pack-summary');
-				if (pps) pps.textContent = 'Updating Prompt Pack...';
-				var ppm = byId('prompt-pack-meta');
-				if (ppm) ppm.textContent = 'Tokens: Recalculating...';
-				send('setPromptPackVariant', { showSpinner: true }, { variant: v });
-			}
-		});
-	}
-
 	var fixMissingKeys = byId('fix-missing-keys');
 	if (fixMissingKeys) {
 		fixMissingKeys.addEventListener('click', function() {
@@ -477,6 +454,14 @@ function bootUi() {
 			if (e.target === modalBackdrop) closePayloadModal();
 		});
 	}
+
+	var btnScanPatterns = byId('btn-scan-patterns');
+	if (btnScanPatterns) {
+		btnScanPatterns.addEventListener('click', function () {
+			send('scanPatterns', { showSpinner: true });
+		});
+	}
+
 	document.addEventListener('keydown', function(e) {
 		if (e.key === 'Escape') closePayloadModal();
 	});
@@ -561,13 +546,6 @@ if (document.readyState === 'loading') {
 	bootUi();
 }
 
-var btnScanPatterns = byId('btn-scan-patterns');
-if (btnScanPatterns) {
-	btnScanPatterns.addEventListener('click', function () {
-		send('scanPatterns', { showSpinner: true });
-	});
-}
-
 // Define at module level, updated when workspaceRoot arrives
 var workspaceRootForPaths = '';
 
@@ -578,6 +556,65 @@ function stripRoot(p) {
     }
     return p;
 }
+
+
+// Confidence icon: high (≥0.85) = clean, medium (≥0.60) = warning, low = uncertain
+function confIcon(c) {
+	if (c >= 0.85) return '';
+	if (c >= 0.60) return ' <span title="Medium confidence">⚠️</span>';
+	return ' <span title="Low confidence">❓</span>';
+}
+
+function renderPatternGroup(elementId, title, icon, items) {
+	var html = '<div style="margin:6px 0 4px 0">'
+		+ '<span class="capitalize" style="font-size:11px;font-weight:600;opacity:0.9">'
+		+ escapeHtml(icon) + ' ' + escapeHtml(title) + ' (' + escapeHtml(items.length) + ')'
+		+ '</span></div>';
+
+	for (var i = 0; i < items.length; i++) {
+		var p = items[i];
+		var count = p.occurrences > 1
+			? ' <span style="opacity:0.5">(×' + escapeHtml(p.occurrences) + ')</span>'
+			: '';
+		var isLast = i === items.length - 1;
+		html += '<div style="padding:2px 0 2px 8px;font-size:11px;'
+			+ 'border-left:2px solid var(--vscode-panel-border);'
+			+ 'margin:2px 0;line-height:1.5">'
+			+ (isLast ? '└─ ' : '├─ ')
+			+ escapeHtml(p.label) + count + confIcon(p.confidence)
+			+ '</div>';
+	}
+
+	var el = byId(elementId);
+	if (!el) {
+		return html;
+	}
+	else {
+		if (items.length === 0) { el.innerHTML = ''; return; }
+		el.innerHTML = html;
+	}
+}
+
+function renderCategories(title, kb, items=[]) {
+	var html = '<div style="margin:6px 0 4px 0">'
+		+ '<div class="capitalize stat"><span>' + escapeHtml(title) + ' <span style="opacity:0.5">(×' + escapeHtml(items.length) + ')</span></span>'
+		+ '<span>' + kb + ' KB</span> '
+		+ '</div></div>';
+
+	for (var i = 0; i < items.length; i++) {
+		var p = items[i];
+		var isLast = i === items.length - 1;
+		html += '<div style="padding:2px 0 2px 8px;font-size:11px;'
+			+ 'border-left:2px solid var(--vscode-panel-border);'
+			+ 'margin:2px 0;line-height:1.5">'
+			+ (isLast ? '└─ ' : '├─ ')
+			+ escapeHtml(p)
+			+ '</div>';
+	}
+
+	return html;
+}
+
 
 window.addEventListener('message', function (e) {
 	if (spinnerActive) hideLoading();
@@ -763,19 +800,19 @@ window.addEventListener('message', function (e) {
 
 		var stalenessEl = byId('staleness');
 		if (stalenessEl) {
-		var sh = data.stalenessHours;
-		if (typeof sh === 'number') {
-			if (sh < 1) {
-				stalenessEl.textContent = 'Fresh';
-			} else if (sh < 24) {
-				stalenessEl.textContent = Math.round(sh) + 'h';
+			var sh = data.stalenessHours;
+			if (typeof sh === 'number') {
+				if (sh < 1) {
+					stalenessEl.textContent = 'Fresh';
+				} else if (sh < 24) {
+					stalenessEl.textContent = Math.round(sh) + 'h';
+				} else {
+					stalenessEl.textContent = Math.round(sh) + 'h';
+				}
 			} else {
-				stalenessEl.textContent = Math.round(sh) + 'h';
+				stalenessEl.textContent = 'Unknown';
+				stalenessEl.style.color = 'var(--vscode-descriptionForeground)';
 			}
-		} else {
-			stalenessEl.textContent = 'Unknown';
-			stalenessEl.style.color = 'var(--vscode-descriptionForeground)';
-		}
 		}
 
 		var catHtml = '';
@@ -783,7 +820,8 @@ window.addEventListener('message', function (e) {
 		for (var name in cats) {
 			var info = cats[name];
 			var kb = (info.size / 1024).toFixed(1);
-			catHtml += '<div class="w-full py-0.5"><div class="stat">' + escapeHtml(name) + ' <span>' + escapeHtml(kb) + ' KB</span></div><div class="text-[11px] opacity-50">' + escapeHtml(info.keys.join(', ')) + '</div></div>';
+			catHtml += renderCategories(escapeHtml(name), escapeHtml(kb), info.keys);
+			// '<div class="w-full py-0.5"><div class="stat"><span class="capitalize">' + escapeHtml(name) + '</span> <span>' + escapeHtml(kb) + ' KB</span></div><div class="text-[11px] opacity-50">' + escapeHtml(info.keys.join(', ')) + '</div></div>';
 		}
 		var categoriesEl = byId('categories');
 		if (categoriesEl) categoriesEl.innerHTML = catHtml || '<span style="color:var(--vscode-descriptionForeground)">No data</span>';
@@ -794,7 +832,7 @@ window.addEventListener('message', function (e) {
 		for (var i = 0; i < sorted.length; i++) {
 			var k = sorted[i];
 			var bytes = keys[k] || 0;
-			keySizesHtml += '<div class="stat"><a class="brain-key-link hover:text-sky-600 transition-all" data-key="' + escapeHtml(k) + '" href="#" title="Open ' + escapeHtml(k) + '.json" style="max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(k) + '</a><span>' + (bytes / 1024).toFixed(1) + ' KB</span></div>';
+			keySizesHtml += '<div class="stat"><span style="max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(k) + '</span><span>' + (bytes / 1024).toFixed(1) + ' KB</span></div>';
 		}
 		var keySizesEl = byId('key-sizes');
 		if (keySizesEl) {
@@ -893,7 +931,7 @@ window.addEventListener('message', function (e) {
 				var missingLine = missingSections.length > 0
 					? '<div style="margin-top:4px">Missing right now: ' + missingSections.map(escapeHtml).join(', ') + '</div>'
 					: '';
-				pps.innerHTML = '<strong>' + escapeHtml(data.promptPackRequestedSectionCount || 0) + '</strong> sections prepared for the <strong>' + escapeHtml(data.promptPackVariant || 'Standard') + '</strong> variant.' +
+				pps.innerHTML = '<strong>' + escapeHtml(data.promptPackRequestedSectionCount || 0) + '</strong> sections prepared.' +
 					'<div style="margin-top:4px"><strong>' + escapeHtml(data.promptPackAvailableSectionCount || 0) + '</strong> available from the current brain.</div>' +
 					'<div style="margin-top:4px"><strong>' + escapeHtml(observerSectionCount) + '</strong> observer intelligence sections included.</div>' +
 					missingLine;
@@ -905,13 +943,6 @@ window.addEventListener('message', function (e) {
 
 		if (!data.advancedDataLoaded) {
 			return;
-		}
-
-		if (typeof data.promptPackVariant === 'string') {
-			var sel = byId('prompt-pack-variant');
-			if (sel && (data.promptPackVariant === 'Small' || data.promptPackVariant === 'Standard' || data.promptPackVariant === 'Deep')) {
-				sel.value = data.promptPackVariant;
-			}
 		}
 
 		var slCount = byId('session-log-count');
@@ -1665,40 +1696,6 @@ window.addEventListener('message', function (e) {
 		var known    = patterns.filter(function(p) { return p.tier === 'known'; });
 		var framework = patterns.filter(function(p) { return p.tier === 'framework'; });
 		var emergent  = patterns.filter(function(p) { return p.tier === 'emergent'; });
-
-		// Confidence icon: high (≥0.85) = clean, medium (≥0.60) = warning, low = uncertain
-		function confIcon(c) {
-			if (c >= 0.85) return '';
-			if (c >= 0.60) return ' <span title="Medium confidence">⚠️</span>';
-			return ' <span title="Low confidence">❓</span>';
-		}
-
-		function renderPatternGroup(elementId, title, icon, items) {
-			var el = byId(elementId);
-			if (!el) { return; }
-			if (items.length === 0) { el.innerHTML = ''; return; }
-
-			var html = '<div style="margin:6px 0 4px 0">'
-				+ '<span style="font-size:11px;font-weight:600;opacity:0.9">'
-				+ escapeHtml(icon) + ' ' + escapeHtml(title) + ' (' + escapeHtml(items.length) + ')'
-				+ '</span></div>';
-
-			for (var i = 0; i < items.length; i++) {
-				var p = items[i];
-				var count = p.occurrences > 1
-					? ' <span style="opacity:0.5">(×' + escapeHtml(p.occurrences) + ')</span>'
-					: '';
-				var isLast = i === items.length - 1;
-				html += '<div style="padding:2px 0 2px 8px;font-size:11px;'
-					+ 'border-left:2px solid var(--vscode-panel-border);'
-					+ 'margin:2px 0;line-height:1.5">'
-					+ (isLast ? '└─ ' : '├─ ')
-					+ escapeHtml(p.label) + count + confIcon(p.confidence)
-					+ '</div>';
-			}
-
-			el.innerHTML = html;
-		}
 
 		renderPatternGroup('patterns-known',     'Known Patterns',     '', known);
 		renderPatternGroup('patterns-framework', 'Framework Patterns', '', framework);

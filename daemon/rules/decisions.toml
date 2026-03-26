@@ -1,0 +1,873 @@
+# =================================================================================
+# DECISION DETECTION RULES – MEMIX
+# =================================================================================
+# Rules are evaluated in order. First match wins for each trigger type.
+# Placeholders:
+#   {name}, {version}, {file}, {path}, {old_path}, {new_path}, {method}, {key}, {value}
+#   {pattern}, {pattern_id}, {pattern_name}, {confidence}, {from_file}, {specifier}, {resolved_to}
+#
+# Conditions support:
+#   file_pattern         – regex on file name
+#   path_pattern         – regex on full file/directory path
+#   language             – programming language (e.g., "typescript", "python")
+#   ast_pattern          – tree-sitter query pattern
+#   dependency_pattern   – regex for package name
+#   key_pattern          – regex for config key
+#   value_pattern        – regex for config value
+#   min_confidence       – minimum confidence to record (0.0–1.0)
+# =================================================================================
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. DEPENDENCY DECISIONS (Frontend Frameworks)
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[rule]]
+id = "dep_react"
+name = "React UI Framework"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^(react|react-dom|react-native|next|remix|gatsby)$" }
+template.title = "Use {name} for UI framework"
+template.rationale = "Added {name}@{version} to {file}. This establishes {name} as the primary UI framework, enabling component-based architecture and reactive state management."
+template.tags = ["dependency", "ui", "framework"]
+template.alternatives = ["Vue", "Svelte", "Angular", "Solid"]
+confidence = 0.95
+
+[[rule]]
+id = "dep_vue"
+name = "Vue.js Framework"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^(vue|@vue/cli|nuxt)$" }
+template.title = "Use {name} for UI framework"
+template.rationale = "Added {name}@{version} to {file}. This establishes {name} as the primary UI framework, enabling single-file components and reactive composition API."
+template.tags = ["dependency", "ui", "framework"]
+template.alternatives = ["React", "Svelte", "Angular"]
+confidence = 0.94
+
+[[rule]]
+id = "dep_angular"
+name = "Angular Framework"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^@angular/" }
+template.title = "Use Angular for UI framework"
+template.rationale = "Added Angular to {file}. This establishes Angular as the primary framework with dependency injection and RxJS."
+template.tags = ["dependency", "ui", "framework"]
+template.alternatives = ["React", "Vue", "Svelte"]
+confidence = 0.92
+
+[[rule]]
+id = "dep_svelte"
+name = "Svelte Framework"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^(svelte|@sveltejs/kit)$" }
+template.title = "Use Svelte for UI framework"
+template.rationale = "Added Svelte to {file}. This establishes Svelte as the primary framework with compile-time reactivity."
+template.tags = ["dependency", "ui", "framework"]
+template.alternatives = ["React", "Vue", "Solid"]
+confidence = 0.90
+
+[[rule]]
+id = "dep_solid"
+name = "Solid.js Framework"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^solid-js$" }
+template.title = "Use Solid.js for UI framework"
+template.rationale = "Added Solid.js to {file}. This establishes Solid as the primary framework with fine-grained reactivity."
+template.tags = ["dependency", "ui", "framework"]
+template.alternatives = ["React", "Vue", "Svelte"]
+confidence = 0.88
+
+# -----------------------------------------------------------------------------
+# State Management
+# -----------------------------------------------------------------------------
+
+[[rule]]
+id = "dep_state_react"
+name = "React State Management"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^(zustand|jotai|redux|mobx|recoil|valtio|xstate|@reduxjs/toolkit)$" }
+template.title = "Use {name} for state management"
+template.rationale = "Added {name}@{version} for global state management. This establishes {name} as the standard solution for managing application state across components."
+template.tags = ["dependency", "state", "architecture"]
+template.alternatives = ["React Context", "URL state", "Local state"]
+confidence = 0.90
+
+[[rule]]
+id = "dep_state_vue"
+name = "Vue State Management"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^(pinia|vuex)$" }
+template.title = "Use {name} for state management"
+template.rationale = "Added {name}@{version} for global state management in Vue. This establishes {name} as the standard store solution."
+template.tags = ["dependency", "state", "architecture"]
+template.alternatives = ["Composable state", "Provide/inject"]
+confidence = 0.88
+
+# -----------------------------------------------------------------------------
+# Backend Frameworks
+# -----------------------------------------------------------------------------
+
+[[rule]]
+id = "dep_express"
+name = "Express.js Backend"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^(express|fastify|koa|hapi)$" }
+template.title = "Use {name} for HTTP server"
+template.rationale = "Added {name}@{version} as the HTTP server framework. This establishes {name} as the standard for building API endpoints and middleware."
+template.tags = ["dependency", "backend", "server"]
+template.alternatives = ["NestJS", "Next.js API routes", "Deno"]
+confidence = 0.92
+
+[[rule]]
+id = "dep_nestjs"
+name = "NestJS Framework"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^@nestjs/core$" }
+template.title = "Use NestJS for backend framework"
+template.rationale = "Added NestJS as the backend framework. This establishes a modular, opinionated architecture with dependency injection."
+template.tags = ["dependency", "backend", "framework"]
+template.alternatives = ["Express", "Fastify", "AdonisJS"]
+confidence = 0.90
+
+[[rule]]
+id = "dep_django"
+name = "Django Backend"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^django$" }
+template.title = "Use Django for backend framework"
+template.rationale = "Added Django as the backend framework. This establishes a batteries-included, MVC-based architecture."
+template.tags = ["dependency", "backend", "python"]
+template.alternatives = ["Flask", "FastAPI", "Falcon"]
+confidence = 0.92
+
+[[rule]]
+id = "dep_flask"
+name = "Flask Backend"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^flask$" }
+template.title = "Use Flask for backend framework"
+template.rationale = "Added Flask as the backend framework. This establishes a lightweight, extensible architecture."
+template.tags = ["dependency", "backend", "python"]
+template.alternatives = ["Django", "FastAPI", "Falcon"]
+confidence = 0.88
+
+[[rule]]
+id = "dep_fastapi"
+name = "FastAPI Backend"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^fastapi$" }
+template.title = "Use FastAPI for backend framework"
+template.rationale = "Added FastAPI as the backend framework. This establishes a modern, async, type-annotated architecture with automatic OpenAPI docs."
+template.tags = ["dependency", "backend", "python"]
+template.alternatives = ["Django", "Flask", "Starlette"]
+confidence = 0.90
+
+[[rule]]
+id = "dep_rails"
+name = "Ruby on Rails"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^rails$" }
+template.title = "Use Ruby on Rails for backend framework"
+template.rationale = "Added Rails as the backend framework. This establishes a convention-over-configuration, full-stack MVC architecture."
+template.tags = ["dependency", "backend", "ruby"]
+template.alternatives = ["Sinatra", "Hanami"]
+confidence = 0.92
+
+[[rule]]
+id = "dep_spring"
+name = "Spring Boot"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^spring-boot-starter" }
+template.title = "Use Spring Boot for backend framework"
+template.rationale = "Added Spring Boot as the backend framework. This establishes a production-ready, Java-based architecture with dependency injection."
+template.tags = ["dependency", "backend", "java"]
+template.alternatives = ["Micronaut", "Quarkus", "Jakarta EE"]
+confidence = 0.92
+
+# -----------------------------------------------------------------------------
+# Database & ORMs
+# -----------------------------------------------------------------------------
+
+[[rule]]
+id = "dep_prisma"
+name = "Prisma ORM"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^prisma$" }
+template.title = "Use Prisma for database layer"
+template.rationale = "Added Prisma as the database ORM. This establishes a type-safe, declarative data access layer with migrations."
+template.tags = ["dependency", "database", "orm"]
+template.alternatives = ["Drizzle", "TypeORM", "Sequelize", "Raw SQL"]
+confidence = 0.94
+
+[[rule]]
+id = "dep_drizzle"
+name = "Drizzle ORM"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^drizzle-orm$" }
+template.title = "Use Drizzle for database layer"
+template.rationale = "Added Drizzle as the database ORM. This establishes a lightweight, type-safe SQL query builder with migrations."
+template.tags = ["dependency", "database", "orm"]
+template.alternatives = ["Prisma", "TypeORM", "Kysely"]
+confidence = 0.92
+
+[[rule]]
+id = "dep_typeorm"
+name = "TypeORM"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^typeorm$" }
+template.title = "Use TypeORM for database layer"
+template.rationale = "Added TypeORM as the database ORM. This establishes a feature-rich, Active Record/Data Mapper pattern for TypeScript."
+template.tags = ["dependency", "database", "orm"]
+template.alternatives = ["Prisma", "Drizzle", "Sequelize"]
+confidence = 0.90
+
+[[rule]]
+id = "dep_mongoose"
+name = "Mongoose ODM"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^mongoose$" }
+template.title = "Use Mongoose for MongoDB layer"
+template.rationale = "Added Mongoose as the MongoDB ODM. This establishes a schema-based, validation-rich data modeling layer for MongoDB."
+template.tags = ["dependency", "database", "mongodb"]
+template.alternatives = ["MongoDB driver", "Prisma (with MongoDB)"]
+confidence = 0.90
+
+[[rule]]
+id = "dep_sqlalchemy"
+name = "SQLAlchemy ORM"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^sqlalchemy$" }
+template.title = "Use SQLAlchemy for database layer"
+template.rationale = "Added SQLAlchemy as the database ORM. This establishes a powerful, Pythonic SQL toolkit and ORM."
+template.tags = ["dependency", "database", "python"]
+template.alternatives = ["Django ORM", "Peewee", "Raw SQL"]
+confidence = 0.92
+
+[[rule]]
+id = "dep_redis"
+name = "Redis Client"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^(redis|ioredis|node-redis)$" }
+template.title = "Use Redis for caching/session store"
+template.rationale = "Added Redis client {name}@{version}. This establishes Redis as the caching, session, or queue solution."
+template.tags = ["dependency", "cache", "redis"]
+template.alternatives = ["Memcached", "In-memory", "PostgreSQL"]
+confidence = 0.88
+
+# -----------------------------------------------------------------------------
+# API & Networking
+# -----------------------------------------------------------------------------
+
+[[rule]]
+id = "dep_trpc"
+name = "tRPC"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^@trpc/server$" }
+template.title = "Use tRPC for type-safe API"
+template.rationale = "Added tRPC as the API layer. This establishes end-to-end type-safe procedures without code generation."
+template.tags = ["dependency", "api", "trpc"]
+template.alternatives = ["GraphQL", "REST", "gRPC"]
+confidence = 0.92
+
+[[rule]]
+id = "dep_graphql"
+name = "GraphQL Server"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^(graphql|@apollo/server|apollo-server-express|graphql-yoga)$" }
+template.title = "Use GraphQL for API layer"
+template.rationale = "Added {name}@{version} as the GraphQL server. This establishes a flexible, query-based API layer with schema-first design."
+template.tags = ["dependency", "api", "graphql"]
+template.alternatives = ["REST", "tRPC", "gRPC"]
+confidence = 0.90
+
+[[rule]]
+id = "dep_axios"
+name = "Axios HTTP Client"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^axios$" }
+template.title = "Use Axios for HTTP requests"
+template.rationale = "Added Axios as the HTTP client. This establishes a promise-based, interceptable client for API calls."
+template.tags = ["dependency", "http", "client"]
+template.alternatives = ["Fetch API", "Ky", "ofetch"]
+confidence = 0.85
+
+# -----------------------------------------------------------------------------
+# Testing Frameworks
+# -----------------------------------------------------------------------------
+
+[[rule]]
+id = "dep_vitest"
+name = "Vitest Testing"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^vitest$" }
+template.title = "Use Vitest for unit testing"
+template.rationale = "Added Vitest as the testing framework. This establishes a fast, Vite-native test runner with Jest-compatible API."
+template.tags = ["dependency", "testing", "unit"]
+template.alternatives = ["Jest", "Mocha", "Ava"]
+confidence = 0.92
+
+[[rule]]
+id = "dep_jest"
+name = "Jest Testing"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^jest$" }
+template.title = "Use Jest for unit testing"
+template.rationale = "Added Jest as the testing framework. This establishes a zero-config, snapshot-capable test runner."
+template.tags = ["dependency", "testing", "unit"]
+template.alternatives = ["Vitest", "Mocha", "Ava"]
+confidence = 0.90
+
+[[rule]]
+id = "dep_playwright"
+name = "Playwright E2E Testing"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^@playwright/test$" }
+template.title = "Use Playwright for E2E testing"
+template.rationale = "Added Playwright as the E2E testing framework. This establishes cross-browser automated testing with modern API."
+template.tags = ["dependency", "testing", "e2e"]
+template.alternatives = ["Cypress", "Puppeteer", "Selenium"]
+confidence = 0.92
+
+[[rule]]
+id = "dep_cypress"
+name = "Cypress E2E Testing"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^cypress$" }
+template.title = "Use Cypress for E2E testing"
+template.rationale = "Added Cypress as the E2E testing framework. This establishes real-time, developer-friendly end-to-end testing."
+template.tags = ["dependency", "testing", "e2e"]
+template.alternatives = ["Playwright", "Puppeteer", "Selenium"]
+confidence = 0.90
+
+# -----------------------------------------------------------------------------
+# CSS & Styling
+# -----------------------------------------------------------------------------
+
+[[rule]]
+id = "dep_tailwind"
+name = "Tailwind CSS"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^tailwindcss$" }
+template.title = "Use Tailwind CSS for styling"
+template.rationale = "Added Tailwind CSS as the styling solution. This establishes a utility-first, highly customizable CSS framework."
+template.tags = ["dependency", "css", "styling"]
+template.alternatives = ["CSS Modules", "Styled Components", "Sass"]
+confidence = 0.92
+
+[[rule]]
+id = "dep_styled_components"
+name = "Styled Components"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^styled-components$" }
+template.title = "Use Styled Components for styling"
+template.rationale = "Added Styled Components as the styling solution. This establishes a CSS-in-JS approach with component-scoped styles."
+template.tags = ["dependency", "css", "css-in-js"]
+template.alternatives = ["Tailwind", "Emotion", "Sass"]
+confidence = 0.88
+
+# -----------------------------------------------------------------------------
+# Authentication & Security
+# -----------------------------------------------------------------------------
+
+[[rule]]
+id = "dep_authjs"
+name = "Auth.js (NextAuth)"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^@auth/core|next-auth$" }
+template.title = "Use Auth.js for authentication"
+template.rationale = "Added Auth.js as the authentication solution. This establishes a flexible, OAuth-first authentication system."
+template.tags = ["dependency", "auth", "security"]
+template.alternatives = ["Lucia", "Passport", "Clerk", "Custom auth"]
+confidence = 0.92
+
+[[rule]]
+id = "dep_lucia"
+name = "Lucia Auth"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^lucia-auth$" }
+template.title = "Use Lucia for authentication"
+template.rationale = "Added Lucia as the authentication solution. This establishes a lightweight, database-agnostic authentication library."
+template.tags = ["dependency", "auth", "security"]
+template.alternatives = ["Auth.js", "Passport", "Clerk"]
+confidence = 0.90
+
+[[rule]]
+id = "dep_passport"
+name = "Passport.js Auth"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^passport$" }
+template.title = "Use Passport.js for authentication"
+template.rationale = "Added Passport as the authentication solution. This establishes a modular, Express-compatible authentication middleware."
+template.tags = ["dependency", "auth", "security"]
+template.alternatives = ["Auth.js", "Lucia", "Custom auth"]
+confidence = 0.88
+
+# -----------------------------------------------------------------------------
+# Build Tools & Compilers
+# -----------------------------------------------------------------------------
+
+[[rule]]
+id = "dep_vite"
+name = "Vite Build Tool"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^vite$" }
+template.title = "Use Vite for build tooling"
+template.rationale = "Added Vite as the build tool. This establishes a fast, modern development server and build pipeline with HMR."
+template.tags = ["dependency", "build", "vite"]
+template.alternatives = ["Webpack", "Rollup", "Parcel"]
+confidence = 0.92
+
+[[rule]]
+id = "dep_webpack"
+name = "Webpack Build Tool"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^webpack$" }
+template.title = "Use Webpack for build tooling"
+template.rationale = "Added Webpack as the build tool. This establishes a highly configurable bundler with extensive plugin ecosystem."
+template.tags = ["dependency", "build", "webpack"]
+template.alternatives = ["Vite", "Rollup", "Parcel"]
+confidence = 0.90
+
+# -----------------------------------------------------------------------------
+# Mobile & Desktop
+# -----------------------------------------------------------------------------
+
+[[rule]]
+id = "dep_react_native"
+name = "React Native"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^react-native$" }
+template.title = "Use React Native for mobile development"
+template.rationale = "Added React Native for mobile development. This establishes a cross-platform native mobile framework."
+template.tags = ["dependency", "mobile", "react-native"]
+template.alternatives = ["Flutter", "Ionic", "NativeScript"]
+confidence = 0.92
+
+[[rule]]
+id = "dep_flutter"
+name = "Flutter"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^flutter_" }   # placeholder; Flutter uses pubspec.yaml
+template.title = "Use Flutter for mobile development"
+template.rationale = "Added Flutter for mobile development. This establishes a cross-platform UI toolkit with Dart."
+template.tags = ["dependency", "mobile", "flutter"]
+template.alternatives = ["React Native", "Ionic"]
+confidence = 0.92
+
+[[rule]]
+id = "dep_electron"
+name = "Electron Desktop"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^electron$" }
+template.title = "Use Electron for desktop development"
+template.rationale = "Added Electron for desktop development. This establishes a cross-platform desktop application framework using web technologies."
+template.tags = ["dependency", "desktop", "electron"]
+template.alternatives = ["Tauri", "NW.js"]
+confidence = 0.90
+
+[[rule]]
+id = "dep_tauri"
+name = "Tauri Desktop"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^@tauri-apps/api$" }
+template.title = "Use Tauri for desktop development"
+template.rationale = "Added Tauri for desktop development. This establishes a lightweight, secure cross-platform desktop framework using Rust."
+template.tags = ["dependency", "desktop", "tauri"]
+template.alternatives = ["Electron", "NW.js"]
+confidence = 0.92
+
+# -----------------------------------------------------------------------------
+# Infrastructure & DevOps
+# -----------------------------------------------------------------------------
+
+[[rule]]
+id = "dep_docker"
+name = "Docker"
+trigger = "file_save"
+condition = { file_pattern = "Dockerfile" }
+template.title = "Use Docker for containerization"
+template.rationale = "Added a Dockerfile. This establishes container-based development and deployment."
+template.tags = ["infrastructure", "docker", "container"]
+confidence = 0.92
+
+[[rule]]
+id = "dep_github_actions"
+name = "GitHub Actions"
+trigger = "file_save"
+condition = { path_pattern = "\\.github/workflows/.*\\.ya?ml$" }
+template.title = "Use GitHub Actions for CI/CD"
+template.rationale = "Added GitHub Actions workflow. This establishes automated testing, building, and deployment pipelines."
+template.tags = ["infrastructure", "ci/cd", "github"]
+confidence = 0.90
+
+[[rule]]
+id = "dep_terraform"
+name = "Terraform"
+trigger = "file_save"
+condition = { file_pattern = ".*\\.tf$" }
+template.title = "Use Terraform for infrastructure as code"
+template.rationale = "Added Terraform configuration. This establishes infrastructure provisioning as code."
+template.tags = ["infrastructure", "terraform", "iac"]
+confidence = 0.88
+
+# =============================================================================
+# 2. STRUCTURAL DECISIONS (Directory Patterns)
+# =============================================================================
+
+[[rule]]
+id = "structure_components"
+name = "Component Directory"
+trigger = "directory_created"
+condition = { path_pattern = ".*/components(/.*)?$" }
+template.title = "Organize components under {path}"
+template.rationale = "Created components directory following UI framework conventions. This establishes a modular, reusable component architecture."
+template.tags = ["structure", "components", "organization"]
+confidence = 0.92
+
+[[rule]]
+id = "structure_lib"
+name = "Shared Utilities"
+trigger = "directory_created"
+condition = { path_pattern = ".*/(lib|utils|helpers)(/.*)?$" }
+template.title = "Organize shared utilities under {path}"
+template.rationale = "Created shared utilities directory. This establishes a centralized location for reusable logic across the codebase."
+template.tags = ["structure", "utilities", "shared"]
+confidence = 0.90
+
+[[rule]]
+id = "structure_api"
+name = "API Routes"
+trigger = "directory_created"
+condition = { path_pattern = ".*/(api|routes|pages/api)(/.*)?$" }
+template.title = "Organize API routes under {path}"
+template.rationale = "Created API routes directory. This establishes the backend API structure following the framework's routing conventions."
+template.tags = ["structure", "api", "backend"]
+confidence = 0.92
+
+[[rule]]
+id = "structure_services"
+name = "Service Layer"
+trigger = "directory_created"
+condition = { path_pattern = ".*/services(/.*)?$" }
+template.title = "Organize business logic under {path}"
+template.rationale = "Created services directory for business logic. This establishes separation of concerns between UI and domain logic."
+template.tags = ["structure", "services", "architecture"]
+confidence = 0.88
+
+[[rule]]
+id = "structure_hooks"
+name = "Custom Hooks"
+trigger = "directory_created"
+condition = { path_pattern = ".*/hooks(/.*)?$" }
+template.title = "Organize custom hooks under {path}"
+template.rationale = "Created hooks directory for React/Vue hooks. This establishes a pattern for reusable stateful logic."
+template.tags = ["structure", "hooks", "react"]
+confidence = 0.90
+
+[[rule]]
+id = "structure_types"
+name = "Type Definitions"
+trigger = "directory_created"
+condition = { path_pattern = ".*/(types|@types|interfaces)(/.*)?$" }
+template.title = "Organize type definitions under {path}"
+template.rationale = "Created types directory for TypeScript definitions. This establishes centralized type management for the project."
+template.tags = ["structure", "typescript", "types"]
+confidence = 0.88
+
+[[rule]]
+id = "structure_tests"
+name = "Test Organization"
+trigger = "directory_created"
+condition = { path_pattern = ".*/(__tests__|tests|test|spec)(/.*)?$" }
+template.title = "Organize tests under {path}"
+template.rationale = "Created tests directory. This establishes a dedicated location for test files following testing conventions."
+template.tags = ["structure", "testing", "quality"]
+confidence = 0.85
+
+[[rule]]
+id = "structure_assets"
+name = "Assets Directory"
+trigger = "directory_created"
+condition = { path_pattern = ".*/(assets|static|public)(/.*)?$" }
+template.title = "Organize static assets under {path}"
+template.rationale = "Created static assets directory. This establishes a dedicated location for images, fonts, and other static files."
+template.tags = ["structure", "assets", "organization"]
+confidence = 0.80
+
+# =============================================================================
+# 3. PATTERN DECISIONS (AST-based)
+# =============================================================================
+
+[[rule]]
+id = "pattern_singleton"
+name = "Singleton Pattern"
+trigger = "file_save"
+condition = { ast_pattern = "singleton", min_confidence = 0.85 }
+template.title = "Use Singleton pattern for {name}"
+template.rationale = "Detected singleton pattern implementation. This ensures a single instance for shared resources like database connections, caches, or configuration."
+template.tags = ["pattern", "singleton", "creational"]
+template.alternatives = ["Dependency injection", "Factory pattern"]
+confidence = 0.88
+
+[[rule]]
+id = "pattern_factory"
+name = "Factory Pattern"
+trigger = "file_save"
+condition = { ast_pattern = "factory", min_confidence = 0.80 }
+template.title = "Use Factory pattern for {name}"
+template.rationale = "Detected factory pattern implementation. This provides flexible object creation with encapsulated instantiation logic."
+template.tags = ["pattern", "factory", "creational"]
+confidence = 0.82
+
+[[rule]]
+id = "pattern_observer"
+name = "Observer Pattern"
+trigger = "file_save"
+condition = { ast_pattern = "observer", min_confidence = 0.80 }
+template.title = "Use Observer pattern for {name}"
+template.rationale = "Detected observer pattern implementation. This establishes event-driven communication and reactive updates."
+template.tags = ["pattern", "observer", "behavioral"]
+confidence = 0.85
+
+[[rule]]
+id = "pattern_strategy"
+name = "Strategy Pattern"
+trigger = "file_save"
+condition = { ast_pattern = "strategy", min_confidence = 0.80 }
+template.title = "Use Strategy pattern for {name}"
+template.rationale = "Detected strategy pattern implementation. This enables runtime algorithm selection and behavior variation."
+template.tags = ["pattern", "strategy", "behavioral"]
+confidence = 0.83
+
+[[rule]]
+id = "pattern_decorator"
+name = "Decorator Pattern"
+trigger = "file_save"
+condition = { ast_pattern = "decorator", min_confidence = 0.80 }
+template.title = "Use Decorator pattern for {name}"
+template.rationale = "Detected decorator pattern implementation. This adds behavior dynamically without modifying core structure."
+template.tags = ["pattern", "decorator", "structural"]
+confidence = 0.84
+
+[[rule]]
+id = "pattern_repository"
+name = "Repository Pattern"
+trigger = "file_save"
+condition = { path_pattern = ".*/repositories/.*", file_pattern = ".*\\.repository\\.(ts|js)$" }
+template.title = "Use Repository pattern for {name}"
+template.rationale = "Created repository file to abstract data access. This follows the repository pattern for clean separation between business logic and persistence."
+template.tags = ["pattern", "repository", "architecture"]
+template.alternatives = ["Active Record", "Direct queries"]
+confidence = 0.90
+
+[[rule]]
+id = "pattern_middleware"
+name = "Middleware Pattern"
+trigger = "file_save"
+condition = { path_pattern = ".*/middleware/.*", file_pattern = ".*\\.middleware\\.(ts|js)$" }
+template.title = "Use Middleware pattern for {name}"
+template.rationale = "Created middleware file. This establishes a chain-of-responsibility pattern for request/response processing."
+template.tags = ["pattern", "middleware", "chain"]
+confidence = 0.88
+
+# =============================================================================
+# 4. API DECISIONS
+# =============================================================================
+
+[[rule]]
+id = "api_endpoint_rest"
+name = "REST Endpoint"
+trigger = "endpoint_created"
+condition = { }
+template.title = "Create {method} {path} endpoint"
+template.rationale = "Created {method} {path} endpoint in {file}. This establishes the API contract for this operation."
+template.tags = ["api", "endpoint", "rest"]
+confidence = 0.92
+
+[[rule]]
+id = "api_graphql_schema"
+name = "GraphQL Schema"
+trigger = "file_save"
+condition = { file_pattern = ".*\\.graphql(s)?$" }
+template.title = "Define GraphQL schema"
+template.rationale = "Added GraphQL schema file. This establishes the GraphQL API contract and type definitions."
+template.tags = ["api", "graphql", "schema"]
+confidence = 0.88
+
+[[rule]]
+id = "api_trpc_router"
+name = "tRPC Router"
+trigger = "file_save"
+condition = { path_pattern = ".*/trpc/.*", file_pattern = ".*\\.router\\.(ts|js)$" }
+template.title = "Use tRPC for type-safe API"
+template.rationale = "Created tRPC router file. This establishes end-to-end type-safe API procedures without schema generation."
+template.tags = ["api", "trpc", "typescript"]
+confidence = 0.90
+
+# =============================================================================
+# 5. CONFIGURATION DECISIONS
+# =============================================================================
+
+[[rule]]
+id = "config_typescript_strict"
+name = "TypeScript Strict Mode"
+trigger = "config_changed"
+condition = { file = "tsconfig\\.json", key = "compilerOptions\\.strict", value = "true" }
+template.title = "Enable TypeScript strict mode"
+template.rationale = "Enabled strict mode in TypeScript. This establishes maximum type safety, catching more bugs at compile time."
+template.tags = ["config", "typescript", "strict"]
+template.alternatives = ["Loose mode", "Gradual adoption"]
+confidence = 0.95
+
+[[rule]]
+id = "config_eslint"
+name = "ESLint Configuration"
+trigger = "config_changed"
+condition = { file_pattern = "(eslint\\.config|\\.eslintrc)" }
+template.title = "Configure ESLint for code quality"
+template.rationale = "Added/updated ESLint configuration. This establishes code linting rules for consistency and quality."
+template.tags = ["config", "linting", "quality"]
+confidence = 0.85
+
+[[rule]]
+id = "config_prettier"
+name = "Prettier Configuration"
+trigger = "config_changed"
+condition = { file_pattern = "(prettier\\.config|\\.prettierrc)" }
+template.title = "Configure Prettier for code formatting"
+template.rationale = "Added Prettier configuration. This establishes automatic code formatting rules."
+template.tags = ["config", "formatting", "quality"]
+confidence = 0.80
+
+[[rule]]
+id = "config_env_example"
+name = "Environment Variables Template"
+trigger = "file_save"
+condition = { file_pattern = "(\\.env\\.example|\\.env\\.template)" }
+template.title = "Create environment variables template"
+template.rationale = "Created .env.example file. This establishes documentation for required environment variables."
+template.tags = ["config", "env", "documentation"]
+confidence = 0.85
+
+# =============================================================================
+# 6. REFACTORING & REORGANIZATION DECISIONS
+# =============================================================================
+
+[[rule]]
+id = "refactor_move"
+name = "File Relocation"
+trigger = "file_moved"
+condition = { }
+template.title = "Move {old_path} to {new_path}"
+template.rationale = "Moved {old_path} to {new_path} for better code organization. This establishes the file's canonical location."
+template.tags = ["refactor", "organization"]
+confidence = 0.80
+
+[[rule]]
+id = "refactor_rename"
+name = "Symbol Rename"
+trigger = "file_save"
+condition = { ast_diff = "symbol_renamed" }
+template.title = "Rename {old_name} to {new_name}"
+template.rationale = "Renamed {old_name} to {new_name} for clarity. This establishes the canonical name for this symbol."
+template.tags = ["refactor", "naming"]
+confidence = 0.75
+
+# =============================================================================
+# 7. TESTING DECISIONS
+# =============================================================================
+
+[[rule]]
+id = "test_file_created"
+name = "Test File Created"
+trigger = "file_save"
+condition = { file_pattern = ".*\\.(test|spec)\\.(ts|js|tsx|jsx|py|go|rs)$" }
+template.title = "Create tests for {name}"
+template.rationale = "Created test file for {name}. This establishes test coverage for this module."
+template.tags = ["testing", "quality"]
+confidence = 0.85
+
+# =============================================================================
+# 8. DOCUMENTATION DECISIONS
+# =============================================================================
+
+[[rule]]
+id = "docs_readme"
+name = "README Created"
+trigger = "file_save"
+condition = { file_pattern = "README(\\.md)?$" }
+template.title = "Create documentation for {path}"
+template.rationale = "Created README file. This establishes project documentation and onboarding information."
+template.tags = ["documentation", "readme"]
+confidence = 0.80
+
+[[rule]]
+id = "docs_storybook"
+name = "Storybook Setup"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^@storybook/" }
+template.title = "Use Storybook for component documentation"
+template.rationale = "Added Storybook for component documentation. This establishes visual documentation and isolated component development."
+template.tags = ["documentation", "storybook", "components"]
+confidence = 0.90
+
+[[rule]]
+id = "docs_api_docs"
+name = "API Documentation"
+trigger = "file_save"
+condition = { file_pattern = "(openapi|swagger)\\.(ya?ml|json)$" }
+template.title = "Define API documentation with OpenAPI"
+template.rationale = "Added OpenAPI specification file. This establishes machine-readable API documentation and contract."
+template.tags = ["documentation", "api", "openapi"]
+confidence = 0.85
+
+# =============================================================================
+# 9. LANGUAGE DECISIONS
+# =============================================================================
+
+[[rule]]
+id = "lang_typescript"
+name = "TypeScript Adoption"
+trigger = "dependency_added"
+condition = { dependency_pattern = "^typescript$" }
+template.title = "Adopt TypeScript for type safety"
+template.rationale = "Added TypeScript to the project. This establishes static typing and improved developer experience."
+template.tags = ["language", "typescript", "types"]
+template.alternatives = ["JavaScript", "Flow", "JSDoc"]
+confidence = 0.92
+
+[[rule]]
+id = "lang_rust"
+name = "Rust Adoption"
+trigger = "dependency_added"
+condition = { file_pattern = "Cargo\\.toml" }
+template.title = "Adopt Rust for performance-critical code"
+template.rationale = "Added Rust to the project. This establishes memory safety and high performance for system-level components."
+template.tags = ["language", "rust", "performance"]
+template.alternatives = ["C++", "Go", "Zig"]
+confidence = 0.90
+
+[[rule]]
+id = "lang_go"
+name = "Go Adoption"
+trigger = "dependency_added"
+condition = { file_pattern = "go\\.mod" }
+template.title = "Adopt Go for backend services"
+template.rationale = "Added Go to the project. This establishes concurrency, simplicity, and compiled performance for backend services."
+template.tags = ["language", "go", "backend"]
+template.alternatives = ["Rust", "Node.js", "Python"]
+confidence = 0.88
+
+# =============================================================================
+# 10. GENERAL / CATCH-ALL
+# =============================================================================
+
+[[rule]]
+id = "any_file_creation"
+name = "File Created"
+trigger = "file_save"
+condition = { is_new = true }
+template.title = "Create {name}"
+template.rationale = "Created new file: {file}. This is a new source file added to the project."
+template.tags = ["creation"]
+confidence = 0.50

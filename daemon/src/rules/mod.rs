@@ -28,7 +28,7 @@ impl IdeRulesConfig {
             IdeType::Cursor => Self {
                 ide,
                 rules_dir: ".cursor/rules".to_string(),
-                rules_file: "memix-brain.mdc".to_string(),
+                rules_file: "memix.mdc".to_string(),
                 guard_file: "memix-guard.mdc".to_string(),
                 supports_multiple_files: true,
             },
@@ -422,7 +422,7 @@ Follow the protocol FIRST. Be helpful SECOND."#
         format!(
             r#"# Memix Agents Protocol
 
-> **IMPORTANT:** This file is read automatically by AI agents that support the AGENTS.md convention. If your IDE does not support AGENTS.md directly, use the rules files in `.cursor/rules/`, `.windsurfrules`, `.github/copilot-instructions.md`, or `.agents/rules/`.
+> **IMPORTANT:** This file is read automatically by AI agents that support the AGENTS.md convention. If your IDE does not support AGENTS.md directly, use the rules files in `.cursor/rules/`, `.windsurf/rules/`, `.github/copilot-instructions.md`, or `.agents/rules/`.
 
 ## What Memix Is
 

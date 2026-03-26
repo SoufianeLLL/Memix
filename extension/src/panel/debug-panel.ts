@@ -25,7 +25,7 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 	private brain: BrainManager | null;
 	private health: HealthMonitor | null;
 	private conflicts: ConflictHandler | null;
-	private promptPackVariant: 'Small' | 'Standard' | 'Deep' = 'Standard';
+	private promptPackVariant: 'Small' | 'Standard' | 'Deep' = 'Deep';
 	private daemonState: DaemonReadinessState = {
 		kind: 'downloading',
 		title: 'Preparing Memix Daemon',
@@ -591,21 +591,33 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 			const includeAdvanced = options?.includeAdvanced !== false;
 			const projectId = this.brain.getProjectId();
 			const activeFile = vscode.window.activeTextEditor?.document?.uri?.fsPath || '';
-			
+
 			// Parallelize independent API calls
 			const [allData, skeletonStats, redisStats] = await Promise.all([
 				this.brain.getAll(),
 				projectId ? MemoryClient.getSkeletonStats(projectId) : Promise.resolve(null),
 				MemoryClient.getRedisStats().catch(() => null)
 			]);
-			
+
 			const keys: Record<string, number> = {};
 			let totalBytes = 0;
+			let warningSignatureBytes = 0;
 			for (const [k, v] of Object.entries(allData)) {
+				// Combine warning_signature files into one aggregate entry
+				if (k.startsWith('warning_')) {
+					const strValue = typeof v === 'string' ? v : JSON.stringify(v);
+					warningSignatureBytes += Buffer.byteLength(strValue || '', 'utf8');
+					continue; // Skip adding individual warning keys
+				}
 				const strValue = typeof v === 'string' ? v : JSON.stringify(v);
 				const size = Buffer.byteLength(strValue || '', 'utf8');
 				keys[k] = size;
 				totalBytes += size;
+			}
+			// Add combined warning_signature entry if any exist
+			if (warningSignatureBytes > 0) {
+				keys['warning_signature_*.json'] = warningSignatureBytes;
+				totalBytes += warningSignatureBytes;
 			}
 
 			// Add skeleton stats if available
@@ -647,7 +659,9 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 			}
 
 			const canonicalKeyList = Object.keys(BRAIN_KEY_SPECS);
-			const allKeysSorted = Array.from(new Set([...canonicalKeyList, ...Object.keys(sizeInfo.keys)])).sort();
+			// Filter out warning_signature files from key coverage display
+			const filteredKeys = Object.keys(sizeInfo.keys).filter(k => !k.startsWith('warning_'));
+			const allKeysSorted = Array.from(new Set([...canonicalKeyList, ...filteredKeys])).sort();
 			const keyCoverage = allKeysSorted.map((k) => {
 				const spec = BRAIN_KEY_SPECS[k];
 				const exists = k in sizeInfo.keys;
@@ -679,13 +693,13 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 
 			const promptPackData = createPromptPack(allData, this.promptPackVariant as PromptPackVariant);
 			const promptPack = promptPackData.text;
-			
+
 			// Parallelize token counting and daemon ping
 			const [tokenResult, healthResp] = await Promise.all([
 				MemoryClient.countTokens(promptPack).catch(() => null),
 				DaemonManager.ping().catch(() => null)
 			]);
-			
+
 			const promptPackTokens = tokenResult?.tokens ?? null;
 			const isPaused = healthResp?.status === 'paused';
 
@@ -1118,9 +1132,17 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 				<h3 class="text-base font-semibold mb-2 w-full">Memory Categories</h3>
 				<div id="categories"></div>
 			</div>
-			<div class="w-full py-8 px-3">
+			<div class="w-full py-8 px-3 border-b border-bottom">
 				<h3 class="text-base font-semibold mb-2 w-full">Warnings</h3>
 				<div class="mt-2" id="warnings"><span>None</span></div>
+			</div>
+			<div class="w-full py-8 px-3">
+				<h3 class="text-base font-semibold mb-2 w-full">Prompt Pack</h3>
+				<div id="prompt-pack-meta" class="mb-4">Tokens: —</div>
+				<div class="flex items-center gap-x-2">
+					<button id="view-prompt-pack" class="w-full action-btn">View Prompt</button>
+				</div>
+				<div id="prompt-pack-summary" class="mt-4 summary-row">Prompt Pack unavailable</div>
 			</div>
 		</div>
 		<div id="view-advanced" class="view">
@@ -1145,9 +1167,13 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 			</div>
 			<div class="w-full py-8 px-3 border-b border-bottom">
 				<h3 class="text-base font-semibold mb-2 w-full">Token Intelligence</h3>
-				<div class="stat">
+				<div class="stat hidden">
 					<span>Session AI Tokens</span>
 					<span id="token-session-ai" class="stat-value">—</span>
+				</div>
+				<div class="stat">
+					<span>Sessions</span>
+					<span id="token-lifetime-sessions" class="stat-value">—</span>
 				</div>
 				<div class="stat">
 					<span>Context Compiled</span>
@@ -1173,19 +1199,13 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 					<span>Compression Ratio</span>
 					<span id="token-compression-ratio" class="stat-value">—</span>
 				</div>
-				<div class="mt-3 pt-3 border-t border-[--vscode-panel-border]" style="opacity:0.8">
-					<div class="stat" style="font-size:11px">
-						<span>Lifetime AI Tokens</span>
-						<span id="token-lifetime-ai" class="stat-value">—</span>
-					</div>
-					<div class="stat" style="font-size:11px">
-						<span>Lifetime Saved</span>
-						<span id="token-lifetime-saved" class="stat-value">—</span>
-					</div>
-					<div class="stat" style="font-size:11px">
-						<span>Sessions</span>
-						<span id="token-lifetime-sessions" class="stat-value">—</span>
-					</div>
+				<div class="stat hidden">
+					<span>Lifetime AI Tokens</span>
+					<span id="token-lifetime-ai" class="stat-value">—</span>
+				</div>
+				<div class="stat hidden">
+					<span>Lifetime Saved</span>
+					<span id="token-lifetime-saved" class="stat-value">—</span>
 				</div>
 			</div>
 			<div class="w-full py-8 px-3 border-b border-bottom">
@@ -1195,8 +1215,9 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 					<span id="required-keys-status" class="stat-value">—</span>
 				</div>
 				<div class="mt-2 w-full flex items-start gap-x-2">
-					<div class="relative w-4 h-2 before:absolute before:top-0 before:left-0 before:bottom-0 before:w-[1px] before:bg-select after:absolute after:bottom-0 after:right-0 after:left-0 after:h-[1px] after:bg-select"></div>
-					<div id="missing-required-keys"></div>
+					<div style="padding:2px 0 2px 8px;font-size:11px;border-left:2px solid var(--vscode-panel-border);margin:2px 0;line-height:1.5">
+						└─ <span id="missing-required-keys"></span>
+					</div>
 				</div>
 				<div class="w-full">
 					<button id="fix-missing-keys" class="action-btn w-full" hidden>Restore baseline keys</button>
@@ -1363,19 +1384,6 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 			<div class="w-full py-8 px-3 border-b border-bottom">
 				<h3 class="text-base font-semibold mb-2 w-full">Brain Key Coverage</h3>
 				<div id="key-coverage" class="key-table"></div>
-			</div>
-			<div class="w-full py-8 px-3">
-				<h3 class="text-base font-semibold mb-2 w-full">Prompt Pack</h3>
-				<div id="prompt-pack-meta" class="mb-4">Tokens: —</div>
-				<div class="flex items-center gap-x-2">
-					<select id="prompt-pack-variant" class="w-full bg-select border pl-2 pr-4 py-1.5 border-0 focus:ring-0 focus:outline-none rounded-none" aria-label="Prompt Pack Variant">
-						<option value="Small">Small</option>
-						<option value="Standard" selected>Standard</option>
-						<option value="Deep">Deep</option>
-					</select>
-					<button id="view-prompt-pack" class="w-full action-btn">View</button>
-				</div>
-				<div id="prompt-pack-summary" class="mt-4 summary-row">Prompt Pack unavailable</div>
 			</div>
 		</div>
 		<div id="view-settings" class="view">

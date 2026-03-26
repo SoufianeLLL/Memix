@@ -6,6 +6,23 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ---
 
+## [1.3.0-beta] (Daemon: 0.6.0-beta) — 2026-03-26
+### Added
+- **Intelligent Decision Detection Engine:** World-class automated architectural decision recording system that observes code changes and automatically captures the "why" behind code evolution.
+  - **TOML-based Rule System:** 35+ configurable rules in `daemon/rules/decisions.toml` covering dependencies, structure, patterns, APIs, config, refactoring, testing, and documentation decisions. Hot-reloadable without recompilation.
+  - **AST Pattern Matching:** Tree-sitter queries detect singleton, repository, factory, middleware patterns directly from code structure.
+  - **Embedding Similarity Detection:** Uses AllMiniLM-L6-v2 embeddings to detect patterns not covered by explicit rules (≥92% similarity threshold).
+  - **Multi-Signal Processing:** Handles dependency additions, directory creation, file saves, moves, config changes, endpoint creation, git commits, and symbol renames.
+  - **Decision Feedback API:** `POST /api/v1/decisions/:id/feedback` accepts useful/dismissed/incorrect feedback from users.
+  - **Self-Improving Confidence:** Rules automatically adjust confidence based on accumulated feedback (+0.05 useful, -0.02 dismissed, -0.10 incorrect).
+  - **Cross-Feature Enhancement:** Decisions enhance warnings (contradiction detection), prompt packs (decision context), code review (dependency conflicts), and onboarding (architecture history).
+
+### Changed
+- **DecisionDetector Architecture:** Refactored from naive hardcoded detection to intelligent rule-based engine with async processing and deduplication.
+- **Brain Storage:** Decisions now stored with `MemoryKind::Decision` and `MemorySource::AgentExtracted`, including rule provenance and evidence chains.
+
+---
+
 ## [1.2.0-beta] (Daemon: 0.5.0-beta) — 2026-03-25
 ### Fixed
 - **Scan Patterns Route:** Fixed 404 error when clicking "Scan Patterns" button - route was `/observer/patterns` but client called `/api/v1/observer/patterns`.

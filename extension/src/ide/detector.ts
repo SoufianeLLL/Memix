@@ -33,17 +33,17 @@ export function getRulesConfig(ide: IDEType): IDERulesConfig {
             return {
                 ide,
                 rulesDir: '.cursor/rules',
-                rulesFile: 'memix-brain.mdc',
+                rulesFile: 'memix.mdc',
                 guardFile: 'memix-guard.mdc',
                 supportsMultipleFiles: true
             };
         case 'windsurf':
             return {
                 ide,
-                rulesDir: '.',
-                rulesFile: '.windsurfrules',
-                guardFile: '.windsurfrules-guard',
-                supportsMultipleFiles: false
+                rulesDir: '.windsurf/rules',
+                rulesFile: 'memix.md',
+                guardFile: 'memix-guard.md',
+                supportsMultipleFiles: true
             };
         case 'claude-code':
             return {

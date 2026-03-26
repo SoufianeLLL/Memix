@@ -11,3 +11,4 @@ pub mod importance;
 pub mod oxc_semantic;
 pub mod embedding_store;
 pub mod background_indexer;
+pub mod decisions;
