@@ -14,7 +14,7 @@ use crate::agents::AgentRuntime;
 use crate::brain::validator::BrainValidator;
 use crate::brain::hierarchy::{BrainHierarchy, HierarchyLayer};
 use crate::brain::manager::BrainManager;
-use crate::brain::schema::MemoryEntry;
+use crate::brain::schema::{MemoryEntry, MemoryKind, MemorySource};
 use crate::context::{CompileRequest, ContextCompiler};
 use crate::learning::{CrossProjectLearner, PromptOptimizer, PromptRecord};
 use crate::license::{LicenseInitiateResult, LicensePendingResult, LicenseTier, LicenseValidator};
@@ -22,6 +22,7 @@ use crate::storage::StorageBackend;
 use crate::token::engine::TokenEngine;
 use crate::rules::{RulesEngine, IdeType};
 use crate::intelligence::autonomous::{AutonomousPairProgrammer, ImpactAnalysis, PredictedQuestion};
+use crate::intelligence::orchestrator::{Orchestrator, OrchestrateRequest};
 use crate::intelligence::proactive::ProactiveWarner;
 use crate::intelligence::predictor::ContextPredictor;
 use crate::migrations;
@@ -158,6 +159,9 @@ pub async fn get_patterns(
         })).into_response();
     };
 
+    // Get project_id from storage for persistence
+    let project_id = state.storage.get_project_id().await.unwrap_or_else(|| "default".to_string());
+
     tracing::info!("Starting pattern scan for workspace: {}", root);
     
     // PatternEngine::analyze is CPU-heavy (walks the entire workspace + parses every file).
@@ -171,6 +175,39 @@ pub async fn get_patterns(
         Ok(r) => {
             tracing::info!("Pattern scan complete: {} files, {} functions, {} patterns found", 
                 r.total_files_scanned, r.total_functions_analyzed, r.patterns.len());
+            
+            // Persist to BRAIN_KEYS.PATTERNS ("patterns.json") so panel metrics work
+            let patterns_entry = MemoryEntry {
+                id: "patterns.json".to_string(),
+                project_id: project_id.clone(),
+                kind: MemoryKind::Context,
+                content: serde_json::to_string(&serde_json::json!({
+                    "architectural_rules": r.patterns.iter().map(|p| serde_json::json!({
+                        "id": p.id,
+                        "name": p.label,
+                        "description": p.category,
+                        "severity": p.tier,
+                        "files_affected": p.evidence.iter().map(|e| e.file.clone()).collect::<std::collections::HashSet<_>>().len(),
+                    })).collect::<Vec<_>>(),
+                    "total_files_scanned": r.total_files_scanned,
+                    "total_functions_analyzed": r.total_functions_analyzed,
+                    "scan_duration_ms": r.scan_duration_ms,
+                    "last_scan": chrono::Utc::now().to_rfc3339(),
+                })).unwrap_or_default(),
+                tags: vec!["patterns".to_string()],
+                source: MemorySource::AgentExtracted,
+                superseded_by: None,
+                contradicts: vec![],
+                parent_id: None,
+                caused_by: vec![],
+                enables: vec![],
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+                access_count: 0,
+                last_accessed_at: None,
+            };
+            let _ = state.storage.upsert_entry(&project_id, patterns_entry).await;
+            
             Json(serde_json::to_value(r).unwrap_or_default()).into_response()
         }
         Err(e) => {
@@ -430,6 +467,7 @@ pub fn build_router(
 
 		// Skeleton Index
 		.route("/api/v1/skeleton/stats/:project_id", get(skeleton_stats))
+		.route("/api/v1/skeleton/purge/:project_id", post(purge_skeleton))
 
 		// Structural Intelligence
 		.route("/api/v1/importance", get(get_importance))
@@ -452,6 +490,9 @@ pub fn build_router(
 
 		// Decision feedback
 		.route("/api/v1/decisions/:decision_id/feedback", post(record_decision_feedback))
+
+		// Context Orchestrator
+        .route("/api/v1/orchestrate", post(orchestrate))
 
         .with_state(shared_state)
 }
@@ -693,6 +734,33 @@ async fn skeleton_stats(
 			"capacity": 2000
 		}))).into_response(),
 		Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+	}
+}
+
+/// POST /api/v1/skeleton/purge/:project_id
+/// Clears all skeleton entries (FSI + FuSI) and embeddings for a project.
+/// Use when stale build artifacts pollute the index.
+async fn purge_skeleton(
+	State(state): State<Arc<AppState>>,
+	Path(project_id): Path<String>,
+) -> impl IntoResponse {
+	if state.config.read().await.brain_paused {
+		return (StatusCode::SERVICE_UNAVAILABLE, "Brain operations are paused").into_response();
+	}
+
+	match state.storage.purge_skeleton_entries(&project_id).await {
+		Ok(count) => {
+			tracing::info!("Purged {} skeleton entries for project {}", count, project_id);
+			(StatusCode::OK, Json(serde_json::json!({
+				"success": true,
+				"project_id": project_id,
+				"entries_purged": count
+			}))).into_response()
+		}
+		Err(e) => {
+			tracing::error!("Failed to purge skeleton entries: {}", e);
+			(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+		}
 	}
 }
 
@@ -1169,7 +1237,7 @@ async fn purge_project(
 async fn daemon_status() -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "status": "healthy",
-        "version": "0.6.0-beta",
+        "version": "0.7.0-beta",
         "features": [
             "autonomous_watching",
             "semantic_diff",
@@ -1678,6 +1746,20 @@ async fn get_token_stats(
     (StatusCode::OK, Json(stats)).into_response()
 }
 
+/// Request body for POST /api/v1/orchestrate
+#[derive(Deserialize)]
+struct OrchestrateRequestBody {
+    prompt: String,
+    project_id: String,
+    active_file: String,
+    #[serde(default)]
+    context_budget: Option<usize>,
+    #[serde(default)]
+    task_type: Option<String>,
+    #[serde(default)]
+    max_depth: Option<usize>,
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // DECISION FEEDBACK - User feedback on auto-detected decisions
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1777,4 +1859,71 @@ async fn record_ai_token_use(
 ) -> impl IntoResponse {
     state.token_tracker.session.record_ai_call(payload.tokens);
     StatusCode::OK.into_response()
+}
+
+/// POST /api/v1/orchestrate
+///
+/// Accepts a raw developer prompt and returns an enhanced version containing
+/// compiled structural context. The enhanced prompt is ready to paste into
+/// any AI chat and enables one-shot answers without AI tool-call discovery.
+async fn orchestrate(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<OrchestrateRequestBody>,
+) -> impl IntoResponse {
+    if state.config.read().await.brain_paused {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Brain operations are paused globally")
+            .into_response();
+    }
+
+    let brain_entries = match state.storage.get_entries(&req.project_id).await {
+        Ok(e) => e,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+    let skeleton_entries = state.storage
+        .get_skeleton_entries(&req.project_id)
+        .await
+        .unwrap_or_default();
+
+    let graph = state.autonomous.lock().await.dependency_graph.clone();
+    let causal_context = render_causal_context(
+        &state.call_graph.lock().await.causal_context_for_file(&req.active_file),
+    );
+    let history = state.recorder.dump_blackbox();
+    let root = state.workspace_root
+        .as_deref()
+        .filter(|s| s.len() < 1024)
+        .map(PathBuf::from);
+
+    let orch_req = OrchestrateRequest {
+        prompt:         req.prompt,
+        project_id:     req.project_id,
+        active_file:    req.active_file,
+        context_budget: req.context_budget,
+        task_type:      req.task_type,
+        max_depth:      req.max_depth,
+    };
+
+    let orchestrator = Orchestrator::new(root);
+    match orchestrator.enhance(
+        orch_req,
+        &graph,
+        &history,
+        &brain_entries,
+        &skeleton_entries,
+        causal_context,
+    ) {
+        Ok(response) => {
+            // Record the compiled tokens so Token Intelligence reflects
+            // orchestration calls alongside plain context compilations.
+            state.token_tracker.session.record_context_compilation(
+                response.compiled_tokens,
+                response.naive_estimate,
+            );
+            (StatusCode::OK, Json(response)).into_response()
+        }
+        Err(e) => {
+            tracing::error!("Orchestrate failed: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
+    }
 }

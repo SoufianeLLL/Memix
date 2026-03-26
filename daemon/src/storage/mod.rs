@@ -33,12 +33,19 @@ pub mod redis;
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
     async fn get_entries(&self, project_id: &str) -> Result<Vec<MemoryEntry>>;
+    async fn get_entry(&self, project_id: &str, entry_id: &str) -> Result<MemoryEntry>;
     async fn upsert_entry(&self, project_id: &str, entry: MemoryEntry) -> Result<()>;
     async fn search_entries(&self, project_id: &str, query: &str) -> Result<Vec<MemoryEntry>>;
     async fn search_similar(&self, project_id: &str, query: &str) -> Result<Vec<MemoryEntry>>;
     async fn delete_entry(&self, project_id: &str, entry_id: &str) -> Result<()>;
     async fn purge_project(&self, project_id: &str) -> Result<()>;
-    async fn embed_text(&self, text: &str) -> Vec<f32> {
+    
+    /// Get the current project ID from storage (first available project)
+    async fn get_project_id(&self) -> Option<String> {
+        None // Default implementation
+    }
+    
+    async fn embed_text(&self, _text: &str) -> Vec<f32> {
         Vec::new() // Default empty implementation
     }
 
@@ -83,6 +90,12 @@ pub trait StorageBackend: Send + Sync {
     async fn delete_skeleton_entry(&self, project_id: &str, entry_id: &str) -> Result<()> {
         let _ = (project_id, entry_id);
         Ok(())
+    }
+
+    /// Purge all skeleton entries for a project (clear the entire index).
+    async fn purge_skeleton_entries(&self, project_id: &str) -> Result<usize> {
+        let _ = project_id;
+        Ok(0)
     }
 
     /// Returns (fsi_count, fusi_count, total, size_bytes) for the skeleton index.

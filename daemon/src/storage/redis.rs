@@ -506,6 +506,47 @@ impl RedisStorage {
 		Ok(())
 	}
 
+	/// Purge all skeleton entries for a project (clear the entire skeleton index).
+	pub async fn purge_skeleton_entries(&self, project_id: &str) -> Result<usize> {
+		{
+			let mut cache = self.skeleton_cache.write().await;
+			cache.remove(project_id);
+		}
+
+		let mut conn = self.get_conn().await?;
+		let hash_key = Self::skeleton_hash_key(project_id);
+		
+		// Get count before deletion
+		let entries: Vec<MemoryEntry> = self.get_skeleton_entries(project_id).await?;
+		let count = entries.len();
+		
+		// Delete the entire hash
+		let _: () = conn.del(&hash_key).await?;
+		
+		// Also clear the embedding store for this project
+		let emb_key = format!("embeddings:{}", project_id);
+		let _: () = conn.del(&emb_key).await?;
+		
+		Ok(count)
+	}
+
+	/// Get the current project ID (first available from brain keys)
+	pub async fn get_project_id(&self) -> Option<String> {
+		// Try to get identity.json which contains project info
+		if let Ok(entries) = self.get_entries("default").await {
+			for entry in entries {
+				if entry.id == "identity.json" {
+					if let Ok(json) = serde_json::from_str::<serde_json::Value>(&entry.content) {
+						if let Some(name) = json.get("name").and_then(|n| n.as_str()) {
+							return Some(name.to_string());
+						}
+					}
+				}
+			}
+		}
+		Some("default".to_string())
+	}
+
 	/// Returns (fsi_count, fusi_count, total, size_bytes) for the skeleton index.
 	pub async fn skeleton_stats(&self, project_id: &str) -> Result<(usize, usize, usize, usize)> {
 		let entries = self.get_skeleton_entries(project_id).await?;
@@ -898,15 +939,27 @@ impl StorageBackend for RedisStorage {
 		RedisStorage::upsert_skeleton_entry(self, project_id, entry).await
 	}
 
-	async fn get_skeleton_entries(&self, project_id: &str) -> Result<Vec<MemoryEntry>> {
-		RedisStorage::get_skeleton_entries(self, project_id).await
+	async fn get_entry(&self, project_id: &str, entry_id: &str) -> Result<MemoryEntry> {
+		// Fetch all entries and find the specific one
+		let entries = RedisStorage::get_entries(self, project_id).await?;
+		entries.into_iter()
+			.find(|e| e.id == entry_id)
+			.ok_or_else(|| anyhow::anyhow!("Entry not found: {}", entry_id))
 	}
 
 	async fn delete_skeleton_entry(&self, project_id: &str, entry_id: &str) -> Result<()> {
 		RedisStorage::delete_skeleton_entry(self, project_id, entry_id).await
 	}
 
+	async fn purge_skeleton_entries(&self, project_id: &str) -> Result<usize> {
+		RedisStorage::purge_skeleton_entries(self, project_id).await
+	}
+
 	async fn skeleton_stats(&self, project_id: &str) -> Result<(usize, usize, usize, usize)> {
 		RedisStorage::skeleton_stats(self, project_id).await
+	}
+
+	async fn get_project_id(&self) -> Option<String> {
+		RedisStorage::get_project_id(self).await
 	}
  }
