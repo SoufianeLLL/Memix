@@ -103,7 +103,7 @@ jobs:
         working-directory: extension
         run: |
           VSIX_NAME="memix-${{ steps.version.outputs.version }}.vsix"
-          vsce package --out "$VSIX_NAME" --no-dependencies
+          vsce package --pre-release --out "$VSIX_NAME" --no-dependencies
           echo "vsix_name=${VSIX_NAME}" >> $GITHUB_OUTPUT
           echo "Packaged: ${VSIX_NAME}"
           # Print size so you can track it over time
