@@ -84,7 +84,7 @@ jobs:
           if [[ "$GITHUB_REF_NAME" == extension-v* ]]; then
             VERSION="${GITHUB_REF_NAME#extension-v}"
           else
-            VERSION=$(node -p "require('./package.json').version")
+            VERSION=$(node -p "require('./extension/package.json').version")
           fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "Publishing version: ${VERSION}"
