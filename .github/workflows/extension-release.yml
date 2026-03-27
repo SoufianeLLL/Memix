@@ -181,6 +181,12 @@ jobs:
       - name: Install ovsx
         run: npm install -g ovsx
 
+      - name: Create Open VSX namespace
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          ovsx create-namespace digitalvizellc --pat "$OVSX_PAT" || echo "Namespace may already exist"
+
       - name: Build extension
         working-directory: extension
         run: npm run compile
