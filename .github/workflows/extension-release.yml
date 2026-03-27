@@ -13,6 +13,11 @@ on:
         required: false
         default: 'false'
         type: boolean
+      skip_marketplace:
+        description: 'Skip VS Marketplace (only publish to Open VSX)'
+        required: false
+        default: 'false'
+        type: boolean
 
 permissions:
   contents: write
@@ -120,8 +125,8 @@ jobs:
     name: Publish to VS Code Marketplace
     needs: package
     runs-on: ubuntu-22.04
-    # Skip publish on dry run
-    if: github.event.inputs.dry_run != 'true'
+    # Skip publish on dry run or when skip_marketplace is set
+    if: github.event.inputs.dry_run != 'true' && github.event.inputs.skip_marketplace != 'true'
 
     steps:
       - uses: actions/checkout@v5
