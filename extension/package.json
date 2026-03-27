@@ -5,6 +5,7 @@
 	"version": "1.4.0",
 	"publisher": "digitalvizellc",
 	"daemonVersion": "0.7.0-beta",
+	"readme": "../README.md",
 	"engines": {
 		"vscode": "^1.107.0"
 	},
