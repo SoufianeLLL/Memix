@@ -217,10 +217,9 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: [package, publish-marketplace, publish-ovsx]
+    needs: [package]
     runs-on: ubuntu-22.04
-    # Run if package succeeded, even if publish jobs were skipped
-    if: always() && needs.package.result == 'success' && github.event.inputs.dry_run != 'true'
+    if: always() && github.event.inputs.dry_run != 'true'
 
     steps:
       - uses: actions/checkout@v5
