@@ -355,7 +355,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				{ label: '$(cloud-upload) Export Brain Mirror', description: 'Force daemon JSON mirror sync (.memix/brain)' },
 				{ label: '$(cloud-download) Import Brain Mirror', description: 'Rehydrate Redis from .memix/brain/*.json' },
 				{ label: '$(tools) Run Brain Migrations', description: 'Backfill vectors + update schema marker' },
-				{ label: '$(organization) Team Sync...', description: 'Sync offline CRDTs' },
+				// { label: '$(organization) Team Sync...', description: 'Sync offline CRDTs' },
 				{ label: '', kind: vscode.QuickPickItemKind.Separator },
 				{ label: '$(trash) Prune Stale Data', description: 'Clear excessive logs' },
 				{ label: '$(wrench) Recover Corruption', description: 'Fix broken structures' },
@@ -375,7 +375,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				'$(cloud-upload) Export Brain Mirror': 'memix.exportBrainMirror',
 				'$(cloud-download) Import Brain Mirror': 'memix.importBrainMirror',
 				'$(tools) Run Brain Migrations': 'memix.migrateBrain',
-				'$(organization) Team Sync...': 'memix.teamSync',
+				// '$(organization) Team Sync...': 'memix.teamSync',
 				'$(trash) Prune Stale Data': 'memix.prune',
 				'$(wrench) Recover Corruption': 'memix.recoverBrain',
 				'$(database) Change Redis Connection...': 'memix.connect',
@@ -751,35 +751,35 @@ export async function activate(context: vscode.ExtensionContext) {
 	);
 
 	// Team Sync
-	context.subscriptions.push(
-		vscode.commands.registerCommand('memix.teamSync', async () => {
-			if (!(await ensureDaemonReady())) { return; }
-			if (!requireWorkspace()) { return; }
-			try {
-				if (!(await licenseManager.ensureProLicense())) {
-					return;
-				}
-				const projectId = brain.getProjectId();
+	// context.subscriptions.push(
+	// 	vscode.commands.registerCommand('memix.teamSync', async () => {
+	// 		if (!(await ensureDaemonReady())) { return; }
+	// 		if (!requireWorkspace()) { return; }
+	// 		try {
+	// 			if (!(await licenseManager.ensureProLicense())) {
+	// 				return;
+	// 			}
+	// 			const projectId = brain.getProjectId();
 
-				vscode.window.withProgress({
-					location: vscode.ProgressLocation.Notification,
-					title: "Memix: Synchronizing team CRDT vectors...",
-					cancellable: false
-				}, async () => {
-					try {
-						const res = await MemoryClient.teamSync(projectId);
-						vscode.window.showInformationMessage(`Memix: ${res.message}`);
-						panelProvider?.sendUpdate();
-					} catch (e: any) {
-						vscode.window.showErrorMessage(`Memix team sync failed: ${e.message}`);
-					}
-				});
+	// 			vscode.window.withProgress({
+	// 				location: vscode.ProgressLocation.Notification,
+	// 				title: "Memix: Synchronizing team CRDT vectors...",
+	// 				cancellable: false
+	// 			}, async () => {
+	// 				try {
+	// 					const res = await MemoryClient.teamSync(projectId);
+	// 					vscode.window.showInformationMessage(`Memix: ${res.message}`);
+	// 					panelProvider?.sendUpdate();
+	// 				} catch (e: any) {
+	// 					vscode.window.showErrorMessage(`Memix team sync failed: ${e.message}`);
+	// 				}
+	// 			});
 
-			} catch (err: any) {
-				vscode.window.showErrorMessage(`Memix team sync failed: ${err.message}`);
-			}
-		})
-	);
+	// 		} catch (err: any) {
+	// 			vscode.window.showErrorMessage(`Memix team sync failed: ${err.message}`);
+	// 		}
+	// 	})
+	// );
 
 	// Show Panel
 	context.subscriptions.push(

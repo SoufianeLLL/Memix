@@ -44,50 +44,47 @@ export class LicenseManager {
 			return false;
 		}
 
-		const billingOption = await vscode.window.showQuickPick(
-			[
-				{ label: 'Monthly', billingInterval: 'monthly' as LicenseBillingInterval, description: 'Pay monthly for Memix Pro' },
-				{ label: 'Yearly', billingInterval: 'yearly' as LicenseBillingInterval, description: 'Pay yearly for Memix Pro' },
-			],
-			{
-				title: 'Choose Memix Pro billing',
-				placeHolder: 'Select a billing interval',
-				ignoreFocusOut: true,
-			}
-		);
-		if (!billingOption) {
-			return false;
-		}
+		try {
+			await vscode.window.withProgress({
+				location: vscode.ProgressLocation.Notification,
+				title: 'Memix Pro',
+				cancellable: false,
+			}, async (progress) => {
+				progress.report({ message: 'Preparing activation...' });
+				const initiation = await MemoryClient.initiateLicense(email);
 
-		await vscode.window.withProgress({
-			location: vscode.ProgressLocation.Notification,
-			title: 'Memix Pro',
-			cancellable: false,
-		}, async (progress) => {
-			progress.report({ message: 'Preparing activation...' });
-			const initiation = await MemoryClient.initiateLicense(email, billingOption.billingInterval);
-			if (initiation.key) {
-				await this.activateWithKey(initiation.key, true, true);
-				return;
-			}
+				// Check for error in response even if HTTP succeeded
+				if (initiation.message && !initiation.checkout_url && !initiation.key) {
+					throw new Error(initiation.message);
+				}
 
-			if (initiation.checkout_url) {
-				progress.report({ message: 'Opening checkout...' });
-				await vscode.env.openExternal(vscode.Uri.parse(initiation.checkout_url));
-			}
-
-			if (initiation.token) {
-				progress.report({ message: 'Waiting for license confirmation...' });
-				const key = await this.pollForLicense(initiation.token);
-				if (key) {
-					await this.activateWithKey(key, true, true);
+				if (initiation.key) {
+					await this.activateWithKey(initiation.key, true, true);
 					return;
 				}
-			}
 
-			throw new Error(initiation.message || 'License activation did not complete in time');
-		});
-		return true;
+				if (initiation.checkout_url) {
+					progress.report({ message: 'Opening checkout...' });
+					await vscode.env.openExternal(vscode.Uri.parse(initiation.checkout_url));
+				}
+
+				if (initiation.token) {
+					progress.report({ message: 'Waiting for license confirmation...' });
+					const key = await this.pollForLicense(initiation.token);
+					if (key) {
+						await this.activateWithKey(key, true, true);
+						return;
+					}
+				}
+
+				throw new Error(initiation.message || 'License activation did not complete in time');
+			});
+			return true;
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'License activation failed';
+			vscode.window.showErrorMessage(message);
+			return false;
+		}
 	}
 
 	async promptAndActivate(): Promise<boolean> {
@@ -101,8 +98,21 @@ export class LicenseManager {
 		if (!key) {
 			return false;
 		}
-		await this.activateWithKey(key, true, true);
-		return true;
+		try {
+			await vscode.window.withProgress({
+				location: vscode.ProgressLocation.Notification,
+				title: 'Memix Pro',
+				cancellable: false,
+			}, async (progress) => {
+				progress.report({ message: 'Activating license...' });
+				await this.activateWithKey(key, true, true);
+			});
+			return true;
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'License activation failed';
+			vscode.window.showErrorMessage(message);
+			return false;
+		}
 	}
 
 	async ensureProLicense(): Promise<boolean> {
@@ -151,9 +161,18 @@ export class LicenseManager {
 	private async pollForLicense(token: string): Promise<string | null> {
 		const deadline = Date.now() + 10 * 60 * 1000;
 		while (Date.now() < deadline) {
-			const pending = await MemoryClient.getPendingLicense(token);
-			if (pending.ready && pending.key) {
-				return pending.key;
+			try {
+				const pending = await MemoryClient.getPendingLicense(token);
+				if (pending.ready && pending.key) {
+					return pending.key;
+				}
+				// Check for error message from server
+				if (pending.message && pending.message.toLowerCase().includes('error')) {
+					throw new Error(pending.message);
+				}
+			} catch (err) {
+				// Re-throw to stop polling on error
+				throw err;
 			}
 			await new Promise((resolve) => setTimeout(resolve, 3000));
 		}

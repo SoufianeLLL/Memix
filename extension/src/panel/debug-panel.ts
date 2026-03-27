@@ -350,11 +350,11 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 						await vscode.commands.executeCommand('memix.importBrain');
 					});
 					break;
-				case 'teamSync':
-					await this.runPanelCommand('Initiating team sync...', async () => {
-						await vscode.commands.executeCommand('memix.teamSync');
-					});
-					break;
+				// case 'teamSync':
+				// 	await this.runPanelCommand('Initiating team sync...', async () => {
+				// 		await vscode.commands.executeCommand('memix.teamSync');
+				// 	});
+				// 	break;
 				case 'prune':
 					await this.runPanelCommand('Pruning stale data...', async () => {
 						await vscode.commands.executeCommand('memix.prune');

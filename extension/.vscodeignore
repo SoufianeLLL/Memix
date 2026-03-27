@@ -15,5 +15,3 @@ vsc-extension-quickstart.md
 !bin/**
 .env
 .env.example
-README.md
-CHANGELOG.md

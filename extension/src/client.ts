@@ -410,12 +410,13 @@ export class MemoryClient {
 		});
 	}
 
-	static async initiateLicense(email: string, billingInterval: LicenseBillingInterval): Promise<LicenseInitiateResponse> {
+	static async initiateLicense(email: string): Promise<LicenseInitiateResponse> {
 		return new Promise((resolve, reject) => {
-			const payload = JSON.stringify({ email, billingInterval });
+			const payload = JSON.stringify({ email });
 			const requestPath = `${API_PREFIX}/license/initiate`;
 			const options: http.RequestOptions = {
 				...getRequestOptions('POST', requestPath),
+				timeout: 15000,
 				headers: {
 					'Content-Type': 'application/json',
 					'Content-Length': Buffer.byteLength(payload)
@@ -424,7 +425,12 @@ export class MemoryClient {
 			const req = http.request(options, (res) => {
 				readResponseBody(res).then((data) => {
 					if ((res.statusCode ?? 500) >= 400) {
-						buildDaemonError(res, requestPath).then(reject, reject);
+						try {
+							const json = JSON.parse(data || '{}');
+							reject(new Error(json.message || 'Failed to initiate license'));
+						} catch {
+							reject(new Error('Failed to initiate license'));
+						}
 						return;
 					}
 					try {
@@ -435,6 +441,10 @@ export class MemoryClient {
 				}, reject);
 			});
 			req.on('error', reject);
+			req.on('timeout', () => {
+				req.destroy();
+				reject(new Error('License server request timed out'));
+			});
 			req.write(payload);
 			req.end();
 		});
@@ -443,10 +453,19 @@ export class MemoryClient {
 	static async getPendingLicense(token: string): Promise<LicensePendingResponse> {
 		return new Promise((resolve, reject) => {
 			const requestPath = `${API_PREFIX}/license/pending/${encodeURIComponent(token)}`;
-			const req = http.request(getRequestOptions('GET', requestPath), (res) => {
+			const options: http.RequestOptions = {
+				...getRequestOptions('GET', requestPath),
+				timeout: 10000,
+			};
+			const req = http.request(options, (res) => {
 				readResponseBody(res).then((data) => {
 					if ((res.statusCode ?? 500) >= 400) {
-						buildDaemonError(res, requestPath).then(reject, reject);
+						try {
+							const json = JSON.parse(data || '{}');
+							reject(new Error(json.message || 'Failed to check license status'));
+						} catch {
+							reject(new Error('Failed to check license status'));
+						}
 						return;
 					}
 					try {
@@ -457,6 +476,10 @@ export class MemoryClient {
 				}, reject);
 			});
 			req.on('error', reject);
+			req.on('timeout', () => {
+				req.destroy();
+				reject(new Error('License status check timed out'));
+			});
 			req.end();
 		});
 	}
@@ -1347,6 +1370,7 @@ export class MemoryClient {
 			const requestPath = `${API_PREFIX}/license/activate`;
 			const options: http.RequestOptions = {
 				...getRequestOptions('POST', requestPath),
+				timeout: 10000,
 				headers: {
 					'Content-Type': 'application/json',
 					'Content-Length': Buffer.byteLength(payload)
@@ -1355,7 +1379,26 @@ export class MemoryClient {
 			const req = http.request(options, (res) => {
 				readResponseBody(res).then((data) => {
 					if ((res.statusCode ?? 500) >= 400) {
-						buildDaemonError(res, requestPath).then(reject, reject);
+						try {
+							const json = JSON.parse(data || '{}');
+							const msg = json.message || '';
+							// Map technical errors to user-friendly messages
+							if (msg.includes('invalid license encoding') || msg.includes('Invalid')) {
+								reject(new Error('Invalid license key. Please check and try again.'));
+							} else if (msg.includes('invalid license signature')) {
+								reject(new Error('Invalid license key. Please check and try again.'));
+							} else if (msg.includes('expired')) {
+								reject(new Error('License key has expired.'));
+							} else if (msg.includes('revoked')) {
+								reject(new Error('License key has been revoked.'));
+							} else if (msg.includes('unavailable')) {
+								reject(new Error('License validation is unavailable. Please try again later.'));
+							} else {
+								reject(new Error(msg || 'License activation failed.'));
+							}
+						} catch {
+							reject(new Error('License activation failed.'));
+						}
 						return;
 					}
 					try {
@@ -1366,6 +1409,10 @@ export class MemoryClient {
 				}, reject);
 			});
 			req.on('error', reject);
+			req.on('timeout', () => {
+				req.destroy();
+				reject(new Error('License activation timed out'));
+			});
 			req.write(payload);
 			req.end();
 		});
