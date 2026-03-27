@@ -2,10 +2,9 @@
 	"name": "memix",
 	"displayName": "Memix - AI Memory Bridge",
 	"description": "An autonomous coding intelligence layer that OBSERVES, UNDERSTANDS, PREDICTS, and REMEMBERS — independently of the AI model. Works with VS Code, Cursor, Windsurf, Antigravity, and Claude Code.",
-	"version": "1.4.0",
+	"version": "1.4.1",
 	"publisher": "digitalvizellc",
 	"daemonVersion": "0.7.0-beta",
-	"readme": "../README.md",
 	"engines": {
 		"vscode": "^1.107.0"
 	},
@@ -213,11 +212,12 @@
 		}
 	},
 	"scripts": {
+		"copy-docs": "node ../scripts/prepare-docs.mjs",
 		"build:css": "npx @tailwindcss/cli -i ./src/panel/styles/tailwind.css -o ./media/app.css",
 		"watch:css": "npx @tailwindcss/cli -i ./src/panel/styles/tailwind.css -o ./media/app.css --watch",
 		"compile": "npm run build:css && webpack",
 		"watch": "npm run watch:css && webpack --watch",
-		"vscode:prepublish": "npm run build:css && npm run compile",
+		"vscode:prepublish": "npm run copy-docs && npm run build:css && npm run compile",
 		"sync:versions": "node ../scripts/sync-versions.mjs",
 		"package": "vsce package",
 		"publish": "vsce publish",

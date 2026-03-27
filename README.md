@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/BUILT WITH-RUST / REDIS / TYPSCRIPT-blue?style=for-the-badge" alt="Daemon version" />
   <img src="https://img.shields.io/badge/INTEGRATED MODELS-AllMiniLM--L6--v2-yellow?style=for-the-badge" alt="Daemon version" />
   <a href="./daemon"><img src="https://img.shields.io/badge/daemon-v0.7.0--beta-emerald?style=for-the-badge" alt="Daemon version" /></a>
-  <a href="./extension"><img src="https://img.shields.io/badge/extension-v1.4.0-orange?style=for-the-badge" alt="Extension version" /></a>
+  <a href="./extension"><img src="https://img.shields.io/badge/extension-v1.4.1-orange?style=for-the-badge" alt="Extension version" /></a>
 </p>
 
 <h1 align="center">

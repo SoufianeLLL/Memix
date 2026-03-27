@@ -103,3 +103,5 @@ package-lock.json
 
 # Memix AI Brain Rules
 .agents/rules/
+
+.windsurf/rules/
