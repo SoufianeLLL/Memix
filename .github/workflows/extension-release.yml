@@ -80,12 +80,18 @@ jobs:
         id: version
         run: |
           # Tag is extension-v0.9.1 → version is 0.9.1
-          VERSION="${GITHUB_REF_NAME#extension-v}"
+          # For manual dispatch, use package.json version directly
+          if [[ "$GITHUB_REF_NAME" == extension-v* ]]; then
+            VERSION="${GITHUB_REF_NAME#extension-v}"
+          else
+            VERSION=$(node -p "require('./package.json').version")
+          fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "Publishing version: ${VERSION}"
 
       - name: Verify package.json version matches tag
         working-directory: extension
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
           TAG_VERSION="${{ steps.version.outputs.version }}"
