@@ -155,7 +155,7 @@ jobs:
         env:
           VS_MARKETPLACE_TOKEN: ${{ secrets.VS_MARKETPLACE_TOKEN }}
         run: |
-          vsce publish --pat "$VS_MARKETPLACE_TOKEN" --packagePath "${{ needs.package.outputs.vsix_name }}"
+          vsce publish --pre-release --pat "$VS_MARKETPLACE_TOKEN" --packagePath "${{ needs.package.outputs.vsix_name }}"
 
   publish-ovsx:
     name: Publish to Open VSX (VSCodium / Cursor)
@@ -256,7 +256,7 @@ jobs:
           files: |
             dist/${{ needs.package.outputs.vsix_name }}
           draft: false
-          prerelease: false
+          prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
