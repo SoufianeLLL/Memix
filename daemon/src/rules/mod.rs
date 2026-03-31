@@ -133,7 +133,7 @@ Every upsert object MUST include "project_id" as a field inside the object itsel
 matching the top-level project_id. Example of a correct upsert:
 
 JSON Format:
-{{ "id": "session_state", "project_id": "PROJECT_ID_HERE", "kind": "context", "source": "agent_extracted", "content": "{{ COMPLETE merged JSON string, not partial... }}", "tags": ["session"] }}
+{{ "id": "session_state", "project_id": "PROJECT_ID_HERE", "kind": "context", "source": "agent_extracted", "content": "{{ COMPLETE merged JSON string... }}", "tags": ["session"], "created_at": "...", "updated_at": "...", "access_count": 0 }}
 
 Schema for the full pending.json:
 JSON Format:
@@ -183,7 +183,7 @@ Update: When tasks are created, started, completed, or blocked.
 
 ⚠️ CRITICAL RULES:
 - NEVER overwrite or replace the entire tasks structure
-- NEVER remove tasks — only change their status
+- Remove/prune completed tasks dynamically to keep the file size small
 - ALWAYS append new tasks to the existing list
 - Each task gets a unique ID (t1, t2, t3...) — IDs are PERMANENT
 - When creating a new task list, set it as current_list and ADD tasks to the lists array
@@ -209,8 +209,8 @@ When the user asks you to create a task list:
 When you complete a task naturally during work (even without the user asking):
 1. Read .memix/brain/tasks.json
 2. Find the task by title or ID
-3. Set status to "completed" and add completed_at timestamp
-4. If completing this task reveals sub-tasks or follow-ups, ADD them as new tasks
+3. Remove the task, or set status to "completed" if keeping for recent history.
+4. Add follow-up tasks if needed.
 5. Save the file
 6. Show: ✅ Task [id] completed: [title]
 

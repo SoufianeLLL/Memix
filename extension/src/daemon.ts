@@ -26,7 +26,7 @@ export class DaemonManager {
     /**
      * Pings an already-running daemon (no spawn). Useful for dev external daemon mode.
      */
-    static async ping(): Promise<{ status: string, message?: string }> {
+    static async ping(): Promise<{ status: string, message?: string, workspace_root?: string, project_id?: string }> {
         const httpUrl = process.env.MEMIX_DAEMON_HTTP_URL;
         if (httpUrl) {
             return await this.pingHttp(httpUrl);
@@ -34,7 +34,7 @@ export class DaemonManager {
         return await this.pingDaemon();
     }
 
-    private static pingHttp(baseUrl: string): Promise<{ status: string, message?: string }> {
+    private static pingHttp(baseUrl: string): Promise<{ status: string, message?: string, workspace_root?: string, project_id?: string }> {
         return new Promise((resolve, reject) => {
             let url: URL;
             try {
@@ -88,8 +88,32 @@ export class DaemonManager {
 
         try {
             const resp = await this.pingDaemon();
-            console.log(`Memix Daemon is already running. Status: ${resp.status}`);
-            return;
+            const sameWorkspace = !workspaceRoot || !resp.workspace_root || resp.workspace_root === workspaceRoot;
+            const sameProject = !projectId || !resp.project_id || resp.project_id === projectId;
+
+            if (sameWorkspace && sameProject) {
+                console.log(`Memix Daemon is already running. Status: ${resp.status}`);
+                return;
+            } else {
+                console.log(`Memix Daemon running for different project (${resp.project_id}). Shutting it down...`);
+                try {
+                    await new Promise<void>((resolve, reject) => {
+                        const req = http.request({
+                            socketPath: this.socketPath,
+                            path: '/api/v1/daemon/shutdown',
+                            method: 'POST'
+                        }, (res) => {
+                            res.on('data', () => {});
+                            res.on('end', resolve);
+                        });
+                        req.on('error', resolve); // ignore errors during shutdown
+                        req.end();
+                    });
+                    await new Promise(r => setTimeout(r, 500)); // give it a moment to exit
+                } catch (e) {
+                    console.error("Error shutting down previous daemon", e);
+                }
+            }
         } catch {
             // Not running, proceed with spawning
         }
@@ -161,7 +185,7 @@ export class DaemonManager {
         }
     }
 
-    private static waitForHealthCheck(): Promise<{ status: string, message?: string }> {
+    private static waitForHealthCheck(): Promise<{ status: string, message?: string, workspace_root?: string, project_id?: string }> {
         return new Promise((resolve, reject) => {
             let retries = 0;
             const maxRetries = 60;
@@ -210,7 +234,7 @@ export class DaemonManager {
         });
     }
 
-    private static pingDaemon(): Promise<{ status: string, message?: string }> {
+    private static pingDaemon(): Promise<{ status: string, message?: string, workspace_root?: string, project_id?: string }> {
         return new Promise((resolve, reject) => {
             const req = http.request(
                 {

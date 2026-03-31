@@ -1234,10 +1234,12 @@ async fn purge_project(
 }
 
 /// Daemon status
-async fn daemon_status() -> impl IntoResponse {
+async fn daemon_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "status": "healthy",
-        "version": "0.7.0-beta",
+        "version": "0.7.1-beta",
+        "workspace_root": state.workspace_root,
+        "project_id": state.active_project_id,
         "features": [
             "autonomous_watching",
             "semantic_diff",

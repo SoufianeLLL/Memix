@@ -48,8 +48,12 @@ pub struct MemoryEntry {
 	#[serde(default)]
 	pub enables: Vec<String>,
 
+    #[serde(default = "chrono::Utc::now")]
     pub created_at: DateTime<Utc>,
+    #[serde(default = "chrono::Utc::now")]
     pub updated_at: DateTime<Utc>,
+    #[serde(default)]
     pub access_count: u32,
+    #[serde(default)]
     pub last_accessed_at: Option<DateTime<Utc>>,
 }
