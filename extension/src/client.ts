@@ -1524,9 +1524,10 @@ export class MemoryClient {
 		});
 	}
 
-	static async getTokenStats(): Promise<TokenStatsResponse> {
+	static async getTokenStats(projectId?: string): Promise<TokenStatsResponse> {
 		return new Promise((resolve, reject) => {
-			const requestPath = `${API_PREFIX}/tokens/stats`;
+			const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+			const requestPath = `${API_PREFIX}/tokens/stats${query}`;
 			const req = http.request(getRequestOptions('GET', requestPath), (res) => {
 				readResponseBody(res).then((data) => {
 					if ((res.statusCode ?? 500) >= 400) {

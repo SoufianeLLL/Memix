@@ -811,7 +811,7 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 					MemoryClient.getObserverGit(),
 					MemoryClient.getAgentConfigs(),
 					MemoryClient.getAgentReports(),
-					MemoryClient.getTokenStats(),
+					MemoryClient.getTokenStats(projectId),
 				]);
 				observerDna = dnaRes.status === 'fulfilled' ? dnaRes.value : null;
 				observerDnaOtel = dnaOtelRes.status === 'fulfilled' ? dnaOtelRes.value : null;

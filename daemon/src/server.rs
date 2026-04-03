@@ -51,8 +51,10 @@ pub struct AppState {
 	pub workspace_registry: Arc<tokio::sync::Mutex<WorkspaceRegistry>>,
 	/// Multi-workspace indexer manager - spawns indexers per workspace
 	pub indexer_manager: Arc<tokio::sync::Mutex<IndexerManager>>,
-	/// Multi-workspace observer manager - spawns file watchers per workspace
+	/// Multi-workspace observer manager - file watchers per workspace
 	pub observer_manager: Arc<tokio::sync::Mutex<ObserverManager>>,
+	/// Multi-workspace token tracker manager - per-workspace stats
+	pub token_tracker_manager: Arc<tokio::sync::Mutex<crate::token::TokenTrackerManager>>,
 	/// Legacy single-workspace fields (kept for backward compatibility)
 	pub workspace_root: Option<String>,
 	pub active_project_id: Option<String>,
@@ -61,7 +63,6 @@ pub struct AppState {
 	pub configured_team_secret: Option<String>,
 	pub license_validator: Arc<LicenseValidator>,
 	pub config: Arc<tokio::sync::RwLock<DaemonConfig>>,
-    pub token_tracker: Arc<crate::token::tracker::TokenTracker>,
     pub embedding_store: crate::observer::embedding_store::EmbeddingStore,
 }
 
@@ -387,6 +388,7 @@ pub fn build_router(
     workspace_registry: Arc<tokio::sync::Mutex<WorkspaceRegistry>>,
     indexer_manager: Arc<tokio::sync::Mutex<IndexerManager>>,
     observer_manager: Arc<tokio::sync::Mutex<ObserverManager>>,
+    token_tracker_manager: Arc<tokio::sync::Mutex<crate::token::TokenTrackerManager>>,
     workspace_root: Option<String>,
     active_project_id: Option<String>,
     configured_team_id: Option<String>,
@@ -394,7 +396,6 @@ pub fn build_router(
     configured_team_secret: Option<String>,
     license_validator: Arc<LicenseValidator>,
     config: Arc<tokio::sync::RwLock<DaemonConfig>>,
-    token_tracker: Arc<crate::token::tracker::TokenTracker>,
     embedding_store: crate::observer::embedding_store::EmbeddingStore,
 ) -> Router {
     let shared_state = Arc::new(AppState {
@@ -409,6 +410,7 @@ pub fn build_router(
         workspace_registry,
         indexer_manager,
         observer_manager,
+        token_tracker_manager,
         workspace_root,
         active_project_id,
         configured_team_id,
@@ -416,7 +418,6 @@ pub fn build_router(
         configured_team_secret,
         license_validator,
         config,
-        token_tracker,
         embedding_store,
     });
 
@@ -1439,7 +1440,7 @@ async fn purge_project(
 async fn daemon_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "status": "healthy",
-        "version": "0.8.0-beta",
+        "version": "0.9.0-beta",
         "workspace_root": state.workspace_root,
         "project_id": state.active_project_id,
         "features": [
@@ -1598,6 +1599,10 @@ async fn compile_context(
 		Ok(entries) => entries,
 		Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
 	};
+	
+	// Get the token tracker for this project
+	let tracker = state.token_tracker_manager.lock().await.get_or_create(&req.project_id).await;
+	
 	let skeleton_entries = state.storage.get_skeleton_entries(&req.project_id).await.unwrap_or_default();
 	let graph = state.autonomous.lock().await.dependency_graph.clone();
 	let causal_context = render_causal_context(
@@ -1611,7 +1616,7 @@ async fn compile_context(
 			// Wire the compilation result into token intelligence.
 			// total_tokens is what Memix actually sent; naive_token_estimate is what
 			// a raw file dump would have cost — the difference is the savings.
-			state.token_tracker.session.record_context_compilation(
+			tracker.session.record_context_compilation(
 				compiled.total_tokens as u64,
 				compiled.naive_token_estimate,
 			);
@@ -1926,9 +1931,19 @@ async fn team_sync(
 
 async fn get_token_stats(
     State(state): State<Arc<AppState>>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
-    let session = state.token_tracker.get_session();
-    let lifetime = state.token_tracker.get_lifetime().await;
+    // Get project_id from query params, fall back to active_project_id
+    let project_id = params.get("project_id")
+        .cloned()
+        .or_else(|| state.active_project_id.clone())
+        .unwrap_or_else(|| "default".to_string());
+    
+    // Get the tracker for this workspace
+    let tracker = state.token_tracker_manager.lock().await.get_or_create(&project_id).await;
+    
+    let session = tracker.get_session();
+    let lifetime = tracker.get_lifetime().await;
     let cache_efficiency_pct = if session.embedding_cache_hits + session.embedding_cache_misses > 0 {
         (session.embedding_cache_hits as f64 / (session.embedding_cache_hits + session.embedding_cache_misses) as f64) * 100.0
     } else {
@@ -2055,13 +2070,21 @@ struct TokenUsagePayload {
     tokens: u64,
     #[allow(dead_code)]
     task_type: Option<String>,
+    project_id: Option<String>,
 }
 
 async fn record_ai_token_use(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<TokenUsagePayload>,
 ) -> impl IntoResponse {
-    state.token_tracker.session.record_ai_call(payload.tokens);
+    // Get project_id from payload or fall back to active
+    let project_id = payload.project_id.clone()
+        .or_else(|| state.active_project_id.clone())
+        .unwrap_or_else(|| "default".to_string());
+    
+    let tracker = state.token_tracker_manager.lock().await.get_or_create(&project_id).await;
+    
+    tracker.session.record_ai_call(payload.tokens);
     StatusCode::OK.into_response()
 }
 
@@ -2100,12 +2123,15 @@ async fn orchestrate(
 
     let orch_req = OrchestrateRequest {
         prompt:         req.prompt,
-        project_id:     req.project_id,
+        project_id:     req.project_id.clone(),
         active_file:    req.active_file,
         context_budget: req.context_budget,
         task_type:      req.task_type,
         max_depth:      req.max_depth,
     };
+    
+    // Get the token tracker for this project
+    let tracker = state.token_tracker_manager.lock().await.get_or_create(&req.project_id).await;
 
     let orchestrator = Orchestrator::new(root);
     match orchestrator.enhance(
@@ -2119,7 +2145,7 @@ async fn orchestrate(
         Ok(response) => {
             // Record the compiled tokens so Token Intelligence reflects
             // orchestration calls alongside plain context compilations.
-            state.token_tracker.session.record_context_compilation(
+            tracker.session.record_context_compilation(
                 response.compiled_tokens,
                 response.naive_estimate,
             );

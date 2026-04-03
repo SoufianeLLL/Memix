@@ -697,24 +697,26 @@ async fn main() -> anyhow::Result<()> {
 		&data_dir,
 		&project_id_for_events,
 	);
-	let token_tracker = Arc::new(
-		crate::token::tracker::TokenTracker::default_empty(
-			&project_id_for_events,
-			&data_dir,
-		)
-	);
 
 	// Initialize multi-tenant workspace registry
 	let workspace_registry = Arc::new(tokio::sync::Mutex::new(
 		crate::workspace_registry::WorkspaceRegistry::new()
 	));
 
+	// Initialize multi-workspace token tracker manager (per-workspace stats)
+	let token_tracker_manager = Arc::new(tokio::sync::Mutex::new(
+		crate::token::TokenTrackerManager::new(data_dir.clone())
+	));
+
+	// Get tracker for initial workspace (needed for indexer/observer)
+	let initial_tracker = token_tracker_manager.lock().await.get_or_create(&project_id_for_events).await;
+
 	// Initialize multi-workspace indexer manager
 	let indexer_manager = Arc::new(tokio::sync::Mutex::new(
 		crate::indexer_manager::IndexerManager::new(
 			storage_backend.clone(),
 			embedding_store.clone(),
-			token_tracker.clone(),
+			initial_tracker.clone(),
 		)
 	));
 
@@ -723,7 +725,7 @@ async fn main() -> anyhow::Result<()> {
 		crate::observer::observer_manager::ObserverManager::new(
 			storage_backend.clone(),
 			embedding_store.clone(),
-			token_tracker.clone(),
+			initial_tracker,
 		)
 	));
 
@@ -747,6 +749,7 @@ async fn main() -> anyhow::Result<()> {
 		workspace_registry.clone(),
 		indexer_manager.clone(),
 		observer_manager.clone(),
+		token_tracker_manager.clone(),
 		app_config.workspace_root.clone(),
 		app_config.project_id.clone(),
 		app_config.team_id.clone(),
@@ -754,7 +757,6 @@ async fn main() -> anyhow::Result<()> {
 		app_config.team_secret.clone(),
 		license_validator,
 		daemon_config.clone(),
-		token_tracker.clone(),
 		embedding_store.clone(),
 	);
 
@@ -909,18 +911,19 @@ async fn main() -> anyhow::Result<()> {
 	// Session counters already start at zero which is correct for a new session.
 	// Loading the lifetime file just restores the historical totals display.
 	{
-		let token_tracker_for_load = token_tracker.clone();
-		let data_dir_for_load = data_dir.clone();
+		let token_tracker_manager_for_load = token_tracker_manager.clone();
 		let project_id_for_load = project_id_for_events.clone();
 		let startup_ready_tokens = startup_ready.clone();
 		tokio::spawn(async move {
 			startup_ready_tokens.notified().await;
+			// Get the tracker for the initial project and load its lifetime data
+			let tracker = token_tracker_manager_for_load.lock().await.get_or_create(&project_id_for_load).await;
 			match tokio::time::timeout(
 				std::time::Duration::from_secs(3),
 				crate::token::tracker::TokenTracker::load_lifetime_into(
-					&token_tracker_for_load,
+					&tracker,
 					&project_id_for_load,
-					&data_dir_for_load,
+					&std::path::PathBuf::from("."),
 				),
 			).await {
 				Ok(Ok(())) => tracing::debug!("TokenTracker lifetime totals loaded"),
@@ -966,7 +969,7 @@ async fn main() -> anyhow::Result<()> {
 	}
 
 	// Periodic flush: token stats, embeddings, and warning cleanup
-	let flush_token_tracker = token_tracker.clone();
+	let flush_token_tracker_manager = token_tracker_manager.clone();
 	let flush_embedding_store = embedding_store.clone();
 	let flush_storage = storage_backend.clone();
 	let flush_project_id = project_id_for_events.clone();
@@ -974,7 +977,8 @@ async fn main() -> anyhow::Result<()> {
 		let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
 		loop {
 			interval.tick().await;
-			let _ = flush_token_tracker.flush_session_to_lifetime(&flush_project_id).await;
+			// Flush all workspace token trackers
+			flush_token_tracker_manager.lock().await.flush_all().await;
 			
 			// Prune stale warning entries: keep only the 10 most recent per project,
 			// and never keep any older than 48 hours. Warnings are diagnostic signals,

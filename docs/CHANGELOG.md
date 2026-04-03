@@ -6,6 +6,19 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ---
 
+## [1.6.0] (Daemon: 0.9.0-beta) — 2026-04-03
+### Added
+- **Per-Workspace Token Intelligence:** Token stats (Sessions, Context Compiled, Tokens Saved, Files Indexed, Cache Efficiency, Compression Ratio) are now tracked independently for each workspace instead of being shared globally.
+  - Each workspace stores its token lifetime stats in `{project_id}_token_lifetime.json`.
+  - `TokenTrackerManager` manages per-workspace token trackers with automatic lifecycle.
+  - `GET /api/v1/tokens/stats?project_id=X` returns stats for the specified workspace.
+
+### Fixed
+- **Brain Key Naming:** Simplified brain key IDs from `.json` suffixed keys (e.g., `session_state.json`) to clean camelCase keys (e.g., `sessionState`) for better readability and consistency.
+- **Observer Data Keys:** Observer entries now use simplified keys (`observerGraph`, `observerChanges`, `observerDna`, `fileMap`, `knownIssues`).
+
+---
+
 ## [1.5.0] (Daemon: 0.8.0-beta) — 2026-04-03
 ### Added
 - **Multi-IDE Support:** Memix now works across multiple AI IDEs simultaneously (VS Code, Cursor, Windsurf, Claude Code, etc.).

@@ -192,6 +192,19 @@ impl TokenTracker {
             session_recorded: std::sync::atomic::AtomicBool::new(false),
         }
     }
+    
+    /// Create with an explicit lifetime path (for per-workspace trackers)
+    pub fn default_empty_with_path(project_id: &str, lifetime_path: std::path::PathBuf) -> Self {
+        Self {
+            session: Arc::new(SessionCounters::new()),
+            lifetime_path,
+            lifetime: RwLock::new(LifetimeTotals {
+                project_id: project_id.to_string(),
+                ..Default::default()
+            }),
+            session_recorded: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
 
     /// Call this when the daemon is shutting down gracefully, or on a periodic
     /// flush timer (every 5 minutes is a good interval).
