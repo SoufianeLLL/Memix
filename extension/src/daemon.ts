@@ -74,6 +74,8 @@ export class DaemonManager {
 
     /**
      * Spawns the Rust Axum daemon and waits for it to become healthy.
+     * With multi-tenant support, the daemon is NOT restarted for different projects.
+     * Instead, workspaces are registered/unregistered via the workspace registry API.
      */
     static async start(binaryPath: string, redisUrl?: string): Promise<void>;
     static async start(binaryPath: string, workspaceRoot?: string | null, redisUrl?: string): Promise<void>;
@@ -88,32 +90,11 @@ export class DaemonManager {
 
         try {
             const resp = await this.pingDaemon();
-            const sameWorkspace = !workspaceRoot || !resp.workspace_root || resp.workspace_root === workspaceRoot;
-            const sameProject = !projectId || !resp.project_id || resp.project_id === projectId;
-
-            if (sameWorkspace && sameProject) {
-                console.log(`Memix Daemon is already running. Status: ${resp.status}`);
-                return;
-            } else {
-                console.log(`Memix Daemon running for different project (${resp.project_id}). Shutting it down...`);
-                try {
-                    await new Promise<void>((resolve, reject) => {
-                        const req = http.request({
-                            socketPath: this.socketPath,
-                            path: '/api/v1/daemon/shutdown',
-                            method: 'POST'
-                        }, (res) => {
-                            res.on('data', () => {});
-                            res.on('end', resolve);
-                        });
-                        req.on('error', resolve); // ignore errors during shutdown
-                        req.end();
-                    });
-                    await new Promise(r => setTimeout(r, 500)); // give it a moment to exit
-                } catch (e) {
-                    console.error("Error shutting down previous daemon", e);
-                }
-            }
+            // Daemon is already running - don't restart it
+            // Multi-tenant support: workspaces are registered separately
+            console.log(`Memix Daemon is already running. Status: ${resp.status}`);
+            console.log(`Memix: Daemon has workspace_root=${resp.workspace_root}, project_id=${resp.project_id}`);
+            return;
         } catch {
             // Not running, proceed with spawning
         }

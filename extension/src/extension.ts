@@ -217,7 +217,32 @@ export async function activate(context: vscode.ExtensionContext) {
 	if (workspaceRoot && projectId) {
 		brain = new BrainManager(projectId);
 		panelProvider.setBrain(brain);
+		
+		// Register this workspace with the daemon (multi-tenant)
+		if (daemonReadinessState.kind === 'ready') {
+			try {
+				await MemoryClient.registerWorkspace(projectId, workspaceRoot);
+				console.log(`Memix: Registered workspace ${projectId}`);
+			} catch (e) {
+				console.warn('Memix: Failed to register workspace', e);
+			}
+		}
 	}
+	
+	// --- Handle window focus changes (activate workspace) ---
+	context.subscriptions.push(
+		vscode.window.onDidChangeWindowState(async (windowState) => {
+			if (windowState.focused && projectId && daemonReadinessState.kind === 'ready') {
+				try {
+					await MemoryClient.activateWorkspace(projectId);
+					console.log(`Memix: Activated workspace ${projectId}`);
+				} catch (e) {
+					// Ignore - daemon may be busy
+				}
+			}
+		})
+	);
+	
 	const licenseManager = new LicenseManager(secretManager, statusBarItem);
 	if (daemonReadinessState.kind === 'ready') {
 		await licenseManager.restoreOnStartup();
@@ -882,7 +907,17 @@ export async function activate(context: vscode.ExtensionContext) {
 	})();
 }
 
-export function deactivate() {
+export async function deactivate() {
+	// Unregister this workspace from the daemon (multi-tenant)
+	if (brain && daemonReadinessState.kind === 'ready') {
+		try {
+			await MemoryClient.unregisterWorkspace(brain.getProjectId());
+			console.log(`Memix: Unregistered workspace ${brain.getProjectId()}`);
+		} catch (e) {
+			// Ignore - daemon may be shutting down
+		}
+	}
+	
 	const config = vscode.workspace.getConfiguration('memix');
 	const externalDaemon = config.get<boolean>('dev.externalDaemon') === true;
 	if (!externalDaemon) {

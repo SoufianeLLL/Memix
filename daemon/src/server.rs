@@ -34,6 +34,8 @@ use crate::observer::graph::DependencyGraph;
 use crate::observer::patterns::PatternEngine;
 use crate::observer::importance::{compute_importance, compute_blast_radius};
 use crate::recorder::flight::{FlightRecorder, FlightRecord};
+use crate::workspace_registry::{WorkspaceRegistry, RegistrySnapshot};
+use crate::indexer_manager::IndexerManager;
 
 pub struct AppState {
     pub storage: Arc<dyn StorageBackend + Send + Sync>,
@@ -44,9 +46,12 @@ pub struct AppState {
 	pub call_graph: Arc<tokio::sync::Mutex<CallGraph>>,
 	pub agent_runtime: Arc<tokio::sync::Mutex<AgentRuntime>>,
 	pub git_insights: Arc<tokio::sync::Mutex<ProjectGitInsights>>,
+	/// Multi-tenant workspace registry - tracks all open projects
+	pub workspace_registry: Arc<tokio::sync::Mutex<WorkspaceRegistry>>,
+	/// Multi-workspace indexer manager - spawns indexers per workspace
+	pub indexer_manager: Arc<tokio::sync::Mutex<IndexerManager>>,
+	/// Legacy single-workspace fields (kept for backward compatibility)
 	pub workspace_root: Option<String>,
-	/// The active project ID - all daemon operations are scoped to this project only.
-	/// Prevents cross-project Redis queries and ensures data isolation.
 	pub active_project_id: Option<String>,
 	pub configured_team_id: Option<String>,
 	pub configured_team_actor_id: String,
@@ -376,6 +381,8 @@ pub fn build_router(
     call_graph: Arc<tokio::sync::Mutex<CallGraph>>,
     agent_runtime: Arc<tokio::sync::Mutex<AgentRuntime>>,
     git_insights: Arc<tokio::sync::Mutex<ProjectGitInsights>>,
+    workspace_registry: Arc<tokio::sync::Mutex<WorkspaceRegistry>>,
+    indexer_manager: Arc<tokio::sync::Mutex<IndexerManager>>,
     workspace_root: Option<String>,
     active_project_id: Option<String>,
     configured_team_id: Option<String>,
@@ -395,6 +402,8 @@ pub fn build_router(
         call_graph,
         agent_runtime,
         git_insights,
+        workspace_registry,
+        indexer_manager,
         workspace_root,
         active_project_id,
         configured_team_id,
@@ -417,6 +426,12 @@ pub fn build_router(
 		.route("/api/v1/license/status", get(get_license_status))
 		.route("/api/v1/redis/ping", post(redis_ping))
 		.route("/api/v1/redis/stats", get(redis_stats))
+		
+		// Workspace Registry (multi-tenant)
+		.route("/api/v1/workspace/register", post(register_workspace))
+		.route("/api/v1/workspace/unregister", post(unregister_workspace))
+		.route("/api/v1/workspace/activate", post(activate_workspace))
+		.route("/api/v1/workspace/list", get(list_workspaces))
 		
 		// Control API
 		.route("/api/v1/control/pause", post(control_pause))
@@ -642,19 +657,136 @@ async fn redis_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 }
 
 /// Simple health check for the VS Code extension to poll on boot
+/// Returns workspace_root and project_id so the extension can detect
+/// when a different project is opened and restart the daemon accordingly.
 async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 	let config = state.config.read().await.clone();
+	let workspace_root = state.workspace_root.clone();
+	let project_id = state.active_project_id.clone();
+	
 	if config.brain_paused {
 		(StatusCode::OK, Json(serde_json::json!({
 			"status": "paused",
-			"message": "Brain is sleeping"
+			"message": "Brain is sleeping",
+			"workspace_root": workspace_root,
+			"project_id": project_id
 		}))).into_response()
 	} else {
     	(StatusCode::OK, Json(serde_json::json!({
 			"status": "healthy",
-			"message": "Memix Daemon is healthy"
+			"message": "Memix Daemon is healthy",
+			"workspace_root": workspace_root,
+			"project_id": project_id
 		}))).into_response()
 	}
+}
+
+// ============================================================================
+// WORKSPACE REGISTRY ENDPOINTS (Multi-Tenant)
+// ============================================================================
+
+#[derive(Debug, Deserialize)]
+struct RegisterWorkspaceRequest {
+    project_id: String,
+    workspace_root: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UnregisterWorkspaceRequest {
+    project_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ActivateWorkspaceRequest {
+    project_id: String,
+}
+
+/// Register a new workspace (called when VS Code window opens)
+async fn register_workspace(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<RegisterWorkspaceRequest>,
+) -> impl IntoResponse {
+    let mut registry = state.workspace_registry.lock().await;
+    let is_new = registry.register(req.project_id.clone(), req.workspace_root.clone());
+    
+    tracing::info!(
+        "Workspace registered: {} ({}) [new={}]",
+        req.project_id,
+        req.workspace_root,
+        is_new
+    );
+    
+    // Spawn an indexer for this workspace
+    if is_new {
+        let mut indexer_manager = state.indexer_manager.lock().await;
+        indexer_manager.spawn_for_workspace(
+            req.project_id.clone(),
+            req.workspace_root.clone(),
+        );
+    }
+    
+    // Return the registry snapshot
+    let snapshot = RegistrySnapshot::from(&*registry);
+    (StatusCode::OK, Json(serde_json::json!({
+        "registered": true,
+        "is_new": is_new,
+        "registry": snapshot
+    })))
+}
+
+/// Unregister a workspace (called when VS Code window closes)
+async fn unregister_workspace(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<UnregisterWorkspaceRequest>,
+) -> impl IntoResponse {
+    // Cancel the indexer for this workspace
+    {
+        let mut indexer_manager = state.indexer_manager.lock().await;
+        indexer_manager.cancel(&req.project_id);
+    }
+    
+    let mut registry = state.workspace_registry.lock().await;
+    let removed = registry.unregister(&req.project_id);
+    
+    tracing::info!(
+        "Workspace unregistered: {} [removed={}]",
+        req.project_id,
+        removed.is_some()
+    );
+    
+    let snapshot = RegistrySnapshot::from(&*registry);
+    (StatusCode::OK, Json(serde_json::json!({
+        "unregistered": removed.is_some(),
+        "registry": snapshot
+    })))
+}
+
+/// Activate a workspace (called when VS Code window gains focus)
+async fn activate_workspace(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ActivateWorkspaceRequest>,
+) -> impl IntoResponse {
+    let mut registry = state.workspace_registry.lock().await;
+    let activated = registry.set_active(&req.project_id);
+    
+    if activated {
+        tracing::info!("Workspace activated: {}", req.project_id);
+    } else {
+        tracing::warn!("Failed to activate workspace: {} (not registered)", req.project_id);
+    }
+    
+    let snapshot = RegistrySnapshot::from(&*registry);
+    (StatusCode::OK, Json(serde_json::json!({
+        "activated": activated,
+        "registry": snapshot
+    })))
+}
+
+/// List all registered workspaces
+async fn list_workspaces(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let registry = state.workspace_registry.lock().await;
+    let snapshot = RegistrySnapshot::from(&*registry);
+    (StatusCode::OK, Json(snapshot))
 }
 
 async fn control_pause(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -1237,7 +1369,7 @@ async fn purge_project(
 async fn daemon_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "status": "healthy",
-        "version": "0.7.1-beta",
+        "version": "0.7.2-beta",
         "workspace_root": state.workspace_root,
         "project_id": state.active_project_id,
         "features": [

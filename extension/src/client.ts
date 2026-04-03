@@ -1640,4 +1640,133 @@ export class MemoryClient {
             httpReq.end();
         });
     }
+
+    // ─── Workspace Registry (Multi-Tenant) ────────────────────────────────────
+    static async registerWorkspace(projectId: string, workspaceRoot: string): Promise<{
+        registered: boolean;
+        is_new: boolean;
+        registry: { workspaces: any[]; active_project_id: string | null };
+    }> {
+        return new Promise((resolve, reject) => {
+            const payload = JSON.stringify({ project_id: projectId, workspace_root: workspaceRoot });
+            const requestPath = `${API_PREFIX}/workspace/register`;
+            const options: http.RequestOptions = {
+                ...getRequestOptions('POST', requestPath),
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(payload),
+                },
+            };
+            const httpReq = http.request(options, (res) => {
+                readResponseBody(res).then((data) => {
+                    if ((res.statusCode ?? 500) >= 400) {
+                        buildDaemonError(res, requestPath).then(reject, reject);
+                        return;
+                    }
+                    try {
+                        resolve(JSON.parse(data || '{}'));
+                    } catch (e) {
+                        reject(e);
+                    }
+                }, reject);
+            });
+            httpReq.on('error', reject);
+            httpReq.write(payload);
+            httpReq.end();
+        });
+    }
+
+    static async unregisterWorkspace(projectId: string): Promise<{
+        unregistered: boolean;
+        registry: { workspaces: any[]; active_project_id: string | null };
+    }> {
+        return new Promise((resolve, reject) => {
+            const payload = JSON.stringify({ project_id: projectId });
+            const requestPath = `${API_PREFIX}/workspace/unregister`;
+            const options: http.RequestOptions = {
+                ...getRequestOptions('POST', requestPath),
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(payload),
+                },
+            };
+            const httpReq = http.request(options, (res) => {
+                readResponseBody(res).then((data) => {
+                    if ((res.statusCode ?? 500) >= 400) {
+                        buildDaemonError(res, requestPath).then(reject, reject);
+                        return;
+                    }
+                    try {
+                        resolve(JSON.parse(data || '{}'));
+                    } catch (e) {
+                        reject(e);
+                    }
+                }, reject);
+            });
+            httpReq.on('error', reject);
+            httpReq.write(payload);
+            httpReq.end();
+        });
+    }
+
+    static async activateWorkspace(projectId: string): Promise<{
+        activated: boolean;
+        registry: { workspaces: any[]; active_project_id: string | null };
+    }> {
+        return new Promise((resolve, reject) => {
+            const payload = JSON.stringify({ project_id: projectId });
+            const requestPath = `${API_PREFIX}/workspace/activate`;
+            const options: http.RequestOptions = {
+                ...getRequestOptions('POST', requestPath),
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(payload),
+                },
+            };
+            const httpReq = http.request(options, (res) => {
+                readResponseBody(res).then((data) => {
+                    if ((res.statusCode ?? 500) >= 400) {
+                        buildDaemonError(res, requestPath).then(reject, reject);
+                        return;
+                    }
+                    try {
+                        resolve(JSON.parse(data || '{}'));
+                    } catch (e) {
+                        reject(e);
+                    }
+                }, reject);
+            });
+            httpReq.on('error', reject);
+            httpReq.write(payload);
+            httpReq.end();
+        });
+    }
+
+    static async listWorkspaces(): Promise<{
+        workspaces: Array<{ project_id: string; workspace_root: string; last_active_at: number; indexing_complete: boolean }>;
+        active_project_id: string | null;
+        active_workspace_root: string | null;
+    }> {
+        return new Promise((resolve, reject) => {
+            const requestPath = `${API_PREFIX}/workspace/list`;
+            const options: http.RequestOptions = {
+                ...getRequestOptions('GET', requestPath),
+            };
+            const httpReq = http.request(options, (res) => {
+                readResponseBody(res).then((data) => {
+                    if ((res.statusCode ?? 500) >= 400) {
+                        buildDaemonError(res, requestPath).then(reject, reject);
+                        return;
+                    }
+                    try {
+                        resolve(JSON.parse(data || '{}'));
+                    } catch (e) {
+                        reject(e);
+                    }
+                }, reject);
+            });
+            httpReq.on('error', reject);
+            httpReq.end();
+        });
+    }
 }

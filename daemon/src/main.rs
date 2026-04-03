@@ -47,6 +47,8 @@ pub mod agents;
 pub mod context;
 pub mod learning;
 pub mod license;
+pub mod workspace_registry;
+pub mod indexer_manager;
 mod constants;
 
 use crate::agents::{AgentRuntime, FileSaveAgentContext, SessionStartContext};
@@ -707,6 +709,26 @@ async fn main() -> anyhow::Result<()> {
 		)
 	);
 
+	// Initialize multi-tenant workspace registry
+	let workspace_registry = Arc::new(tokio::sync::Mutex::new(
+		crate::workspace_registry::WorkspaceRegistry::new()
+	));
+
+	// Initialize multi-workspace indexer manager
+	let indexer_manager = Arc::new(tokio::sync::Mutex::new(
+		crate::indexer_manager::IndexerManager::new(
+			storage_backend.clone(),
+			embedding_store.clone(),
+			token_tracker.clone(),
+		)
+	));
+
+	// If a workspace was provided at startup, register it as the initial workspace
+	if let (Some(root), Some(pid)) = (&app_config.workspace_root, &app_config.project_id) {
+		workspace_registry.lock().await.register(pid.clone(), root.clone());
+		tracing::info!("Initial workspace registered: {} ({})", pid, root);
+	}
+
     // 3. Build the Axum server routes and pass the shared storage state.
 	// Happens before any Redis I/O so the socket can bind immediately after.
     let app = server::build_router(
@@ -718,6 +740,8 @@ async fn main() -> anyhow::Result<()> {
 		call_graph.clone(),
 		agent_runtime.clone(),
 		git_insights.clone(),
+		workspace_registry.clone(),
+		indexer_manager.clone(),
 		app_config.workspace_root.clone(),
 		app_config.project_id.clone(),
 		app_config.team_id.clone(),
@@ -925,20 +949,11 @@ async fn main() -> anyhow::Result<()> {
 		});
 	}
 
-	// Spawn background indexer (unchanged — already had a 5s delay)
-	if let Some(root) = app_config.workspace_root.clone() {
-		let indexer = crate::observer::background_indexer::BackgroundIndexer::new(
-			std::path::PathBuf::from(root),
-			project_id_for_events.clone(),
-			storage_backend.clone(),
-			embedding_store.clone(),
-			token_tracker.clone(),
-		);
-		let startup_ready_indexer = startup_ready.clone();
-		tokio::spawn(async move {
-			startup_ready_indexer.notified().await;
-			indexer.run_if_needed().await;
-		});
+	// Spawn background indexer for initial workspace via indexer_manager
+	// (Multi-workspace: additional indexers are spawned via workspace registration API)
+	if let (Some(root), Some(pid)) = (&app_config.workspace_root, &app_config.project_id) {
+		let mut im = indexer_manager.lock().await;
+		im.spawn_for_workspace(pid.clone(), root.clone());
 	}
 
 	// Periodic flush: token stats, embeddings, and warning cleanup

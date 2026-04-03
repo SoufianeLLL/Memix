@@ -53,6 +53,17 @@ The **background indexer** starts 5 seconds after daemon launch and walks the en
 
 The **token tracker** begins recording session statistics: context compilations, tokens compiled by Memix, tokens sent to AI, and the estimated savings from structural compression versus a naive paste approach. Both the EmbeddingStore and TokenTracker start empty and load in the background, so the panel becomes responsive within 1–2 seconds even on slow Redis connections, with data appearing progressively as the background tasks complete.
 
+## Multi-Window / Multi-Project Support
+
+Memix supports multiple VS Code windows and projects simultaneously. When you open a second project:
+
+1. The extension registers the new workspace with the running daemon
+2. A background indexer spawns independently for that project
+3. Switching between windows instantly activates the corresponding workspace
+4. No daemon restart is needed — the single daemon instance handles all projects
+
+Each project maintains its own brain in Redis (keyed by project ID) and its own `.memix` folder in the workspace root. The daemon tracks which window is active and prioritizes background indexing for the focused project.
+
 ## How It Works (Architecture Summary)
 
 Memix runs as a local Rust daemon and communicates with the extension over a Unix domain socket (`~/.memix/daemon.sock` on macOS and Linux) or TCP on port 3456 (Windows and developer mode).

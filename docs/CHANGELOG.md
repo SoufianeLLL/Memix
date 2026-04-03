@@ -6,6 +6,21 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ---
 
+## [1.4.4-beta] (Daemon: 0.7.2-beta) — 2026-04-03
+### Added
+- **Multi-Tenant Workspace Support:** Memix now supports multiple VS Code windows/projects simultaneously without daemon restarts.
+  - **Workspace Registry:** Single daemon instance tracks all open workspaces and their state.
+  - **Per-Workspace Indexing:** Background indexer spawns independently for each registered workspace.
+  - **Instant Project Switching:** ~0ms switch time when changing between projects - no daemon restart needed.
+  - **Window Focus Tracking:** Active workspace updates automatically when switching VS Code windows.
+  - **New API Endpoints:** `/api/v1/workspace/register`, `/unregister`, `/activate`, `/list` for workspace lifecycle management.
+  - **Health Endpoint Enhancement:** `/health` now returns `workspace_root` and `project_id` for proper project detection.
+
+### Fixed
+- **Project Sticking Bug:** Fixed critical bug where the first initialized project would "stick" to the daemon, preventing subsequent projects from being properly initialized. The daemon now correctly handles multiple projects through the workspace registry instead of restarting for each project change.
+
+---
+
 ## [1.4.0-beta] (Daemon: 0.7.0-beta) — 2026-03-26
 ### Added
 - **Context Orchestrator Refinements:** Major improvements to context relevance and accuracy.

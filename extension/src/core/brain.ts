@@ -275,7 +275,7 @@ export class BrainManager {
             createdAt: existingMeta?.createdAt || new Date().toISOString(),
             lastAccessed: new Date().toISOString(),
             totalSessions: existingMeta?.totalSessions || 0,
-            brainVersion: '1.4.3',
+            brainVersion: '1.4.4',
             sizeBytes: sizeInfo.totalBytes
         };
 
