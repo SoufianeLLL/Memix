@@ -12,3 +12,5 @@ pub mod oxc_semantic;
 pub mod embedding_store;
 pub mod background_indexer;
 pub mod decisions;
+pub mod observer_manager;
+pub mod workspace_processor;

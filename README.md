@@ -6,8 +6,8 @@
   <a href="https://marketplace.visualstudio.com/items?itemName=digitalvizellc.memix"><img src="https://img.shields.io/visual-studio-marketplace/v/digitalvizellc.memix?label=VS%20Marketplace&color=0078D4&logo=visual-studio-code&style=for-the-badge" alt="VS Marketplace" /></a>
   <img src="https://img.shields.io/badge/BUILT WITH-RUST / REDIS / TYPSCRIPT-blue?style=for-the-badge" alt="Daemon version" />
   <img src="https://img.shields.io/badge/INTEGRATED MODELS-AllMiniLM--L6--v2-yellow?style=for-the-badge" alt="Daemon version" />
-  <a href="./daemon"><img src="https://img.shields.io/badge/daemon-v0.7.2--beta-emerald?style=for-the-badge" alt="Daemon version" /></a>
-  <a href="./extension"><img src="https://img.shields.io/badge/extension-v1.4.4-orange?style=for-the-badge" alt="Extension version" /></a>
+  <a href="./daemon"><img src="https://img.shields.io/badge/daemon-v0.8.0--beta-emerald?style=for-the-badge" alt="Daemon version" /></a>
+  <a href="./extension"><img src="https://img.shields.io/badge/extension-v1.5.0-orange?style=for-the-badge" alt="Extension version" /></a>
 </p>
 
 <h1 align="center">
@@ -115,6 +115,9 @@ Layer-based memory resolution supports parent-child context inheritance for mono
 
 ### Multi-Tenant Workspace Support
 Run Memix across multiple VS Code windows and projects simultaneously. A single daemon instance tracks all open workspaces through a workspace registry, spawning independent background indexers per project. Switching between projects is instant (~0ms) with no daemon restart needed. Window focus automatically activates the corresponding workspace for background indexing priority.
+
+### Multi-IDE Support
+Use Memix across multiple AI IDEs at the same time — VS Code, Cursor, Windsurf, Claude Code, Antigravity, and any VS Code-compatible fork. All IDEs share a single daemon binary stored at `~/.memix/bin/`, eliminating redundant downloads. The daemon tracks which workspace is active across all IDEs and routes API calls to the correct project context.
 
 ### Team Sync
 CRDT-based brain synchronization for teams. Push, pull, and merge architectural decisions, patterns, and shared context across team members using a conflict-free replicated data type foundation.

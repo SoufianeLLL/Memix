@@ -234,8 +234,24 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.window.onDidChangeWindowState(async (windowState) => {
 			if (windowState.focused && projectId && daemonReadinessState.kind === 'ready') {
 				try {
-					await MemoryClient.activateWorkspace(projectId);
-					console.log(`Memix: Activated workspace ${projectId}`);
+					// Re-derive projectId from current workspace (may be different if multi-root)
+					const currentWorkspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+					const currentProjectId = currentWorkspaceRoot 
+						? (vscode.workspace.getConfiguration('memix').get<string>('projectId') || hashProjectId(currentWorkspaceRoot))
+						: projectId;
+					
+					// Update BrainManager if projectId changed
+					if (brain && currentProjectId !== brain.getProjectId()) {
+						brain.setProjectId(currentProjectId);
+						panelProvider.setBrain(brain);
+						console.log(`Memix: Switched to workspace ${currentProjectId}`);
+					}
+					
+					// Activate workspace in daemon
+					await MemoryClient.activateWorkspace(currentProjectId);
+					
+					// Refresh panel with new workspace data
+					await vscode.commands.executeCommand('memix.refreshPanel');
 				} catch (e) {
 					// Ignore - daemon may be busy
 				}

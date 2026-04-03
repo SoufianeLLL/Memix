@@ -51,20 +51,15 @@ pub mod workspace_registry;
 pub mod indexer_manager;
 mod constants;
 
-use crate::agents::{AgentRuntime, FileSaveAgentContext, SessionStartContext};
+use crate::agents::{AgentRuntime, SessionStartContext};
 use crate::intelligence::autonomous::AutonomousPairProgrammer;
-use crate::intelligence::intent::IntentEngine;
 use crate::intelligence::predictor::ContextPredictor;
-use crate::git::archaeologist::{GitArchaeologist, ProjectGitInsights};
+use crate::git::archaeologist::ProjectGitInsights;
 use crate::observer::call_graph::CallGraph;
-use crate::observer::differ::AstDiffer;
-use crate::observer::dna::{DnaRuleConfig, ProjectCodeDna};
-use crate::observer::decisions::{DecisionDetector, DecisionSignal};
-use crate::observer::imports::{extract_imports, signature_head};
+use crate::observer::dna::ProjectCodeDna;
 use crate::observer::parser::{AstNodeFeature, AstParser};
-use crate::recorder::flight::{FlightRecorder, SessionEvent};
+use crate::recorder::flight::FlightRecorder;
 use crate::brain::schema::{MemoryEntry, MemoryKind, MemorySource};
-use crate::token::engine::TokenEngine;
 use chrono::Utc;
 use notify::EventKind;
 
@@ -723,6 +718,15 @@ async fn main() -> anyhow::Result<()> {
 		)
 	));
 
+	// Initialize multi-workspace observer manager (file watchers)
+	let observer_manager = Arc::new(tokio::sync::Mutex::new(
+		crate::observer::observer_manager::ObserverManager::new(
+			storage_backend.clone(),
+			embedding_store.clone(),
+			token_tracker.clone(),
+		)
+	));
+
 	// If a workspace was provided at startup, register it as the initial workspace
 	if let (Some(root), Some(pid)) = (&app_config.workspace_root, &app_config.project_id) {
 		workspace_registry.lock().await.register(pid.clone(), root.clone());
@@ -742,6 +746,7 @@ async fn main() -> anyhow::Result<()> {
 		git_insights.clone(),
 		workspace_registry.clone(),
 		indexer_manager.clone(),
+		observer_manager.clone(),
 		app_config.workspace_root.clone(),
 		app_config.project_id.clone(),
 		app_config.team_id.clone(),
@@ -954,6 +959,10 @@ async fn main() -> anyhow::Result<()> {
 	if let (Some(root), Some(pid)) = (&app_config.workspace_root, &app_config.project_id) {
 		let mut im = indexer_manager.lock().await;
 		im.spawn_for_workspace(pid.clone(), root.clone());
+		
+		// Spawn observer for initial workspace via observer_manager
+		let mut om = observer_manager.lock().await;
+		om.spawn_for_workspace(pid.clone(), root.clone());
 	}
 
 	// Periodic flush: token stats, embeddings, and warning cleanup
@@ -997,922 +1006,163 @@ async fn main() -> anyhow::Result<()> {
 		}
 	});
 
-    // 5. Spawn the AST Background Observer
-    let (tx, mut rx) = tokio::sync::mpsc::channel(100);
-    
-    // Watch directory is dynamically resolved via the workspace mounting path or defaults to execution context.
-    let watch_dir = app_config
-        .workspace_root
-        .clone()
-        .map(std::path::PathBuf::from)
-        .unwrap_or(std::env::current_dir()?);
-	let archaeology_root = watch_dir.clone();
-    tokio::spawn(async move {
-        let _ = observer::watcher::start_watcher(watch_dir.to_string_lossy().to_string(), tx).await;
-    });
-
-    // Handle AST Events concurrently without blocking the HTTP listener
-	let pending_path = app_config
-		.workspace_root
-		.clone()
-		.map(|root| std::path::PathBuf::from(root).join(".memix").join("brain").join("pending.json"));
- 	let pending_ack_path = app_config
-		.workspace_root
-		.clone()
-		.map(|root| std::path::PathBuf::from(root).join(".memix").join("brain").join("pending.ack.json"));
-	let pending_path_poll = pending_path.clone();
-	let pending_ack_path_poll = pending_ack_path.clone();
-	if pending_path.is_none() {
-		tracing::warn!(
-			"No workspace_root configured — pending.json writeback and observer pipeline disabled. Set MEMIX_WORKSPACE_ROOT or workspace_root in config.toml."
-		);
-	}
- 	let pending_processing_lock = Arc::new(tokio::sync::Mutex::new(()));
- 	let pending_processing_lock_for_poll = pending_processing_lock.clone();
- 	let storage_for_pending_poll = storage_backend.clone();
- 	let storage_for_events = storage_backend.clone();
- 	let autonomous_for_events = autonomous.clone();
-	let recorder_for_events = recorder.clone();
-	let code_dna_for_events = code_dna.clone();
-	let predictor_for_events = predictor.clone();
-	let agent_runtime_for_events = agent_runtime.clone();
-	let git_insights_for_events = git_insights.clone();
- 	let project_id_for_events = project_id_for_events.clone();
- 	let dna_rules_root = archaeology_root.clone();
- 	let config_for_events = daemon_config.clone();
-
-    tokio::spawn(async move {
-		let Some(pending_path_poll) = pending_path_poll else {
+	// ─── Multi-Workspace Observer Event Processor ──────────────────────────────
+	// The ObserverManager spawns per-workspace file watchers that send TaggedEvents.
+	// This single processor loop receives tagged events and dispatches to the correct
+	// WorkspaceProcessor based on project_id.
+	
+	// Take the event receiver from ObserverManager (can only be done once)
+	let event_rx = observer_manager.lock().await.take_event_receiver();
+	
+	// Shared references for the event processor
+	let processor_storage = storage_backend.clone();
+	let processor_autonomous = autonomous.clone();
+	let processor_recorder = recorder.clone();
+	let processor_predictor = predictor.clone();
+	let processor_call_graph = call_graph.clone();
+	let processor_agent_runtime = agent_runtime.clone();
+	let processor_code_dna = code_dna.clone();
+	let processor_git_insights = git_insights.clone();
+	let processor_config = daemon_config.clone();
+	let processor_observer_manager = observer_manager.clone();
+	
+	// Spawn the event processor loop
+	tokio::spawn(async move {
+		let Some(mut event_rx) = event_rx else {
+			tracing::warn!("ObserverManager event receiver not available — observer pipeline disabled");
 			return;
 		};
-		let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
-		let mut last_processed_mtime: Option<std::time::SystemTime> = None;
-		loop {
-			interval.tick().await;
-			let metadata = match tokio::fs::metadata(&pending_path_poll).await {
-				Ok(metadata) => metadata,
-				Err(_) => continue,
-			};
-			let modified = match metadata.modified() {
-				Ok(modified) => modified,
-				Err(e) => {
-					tracing::debug!("Failed reading pending.json mtime: {}", e);
-					continue;
-				}
-			};
-			if last_processed_mtime.is_some_and(|last| modified <= last) {
-				continue;
-			}
-			let _guard = pending_processing_lock_for_poll.lock().await;
-			if process_pending_brain_update(
-				storage_for_pending_poll.clone(),
-				&pending_path_poll,
-				pending_ack_path_poll.as_deref(),
-				"poller",
-			)
-			.await
-			{
-				last_processed_mtime = Some(modified);
-			}
-		}
-	});
-
-    let project_id_for_spawn = project_id_for_events.clone();
-    tokio::spawn(async move {
-		// Find the real git root by walking up from workspace_root
-		let git_root = {
-			let mut dir = archaeology_root.clone();
-			let mut found: Option<std::path::PathBuf> = None;
-			loop {
-				if dir.join(".git").exists() {
-					found = Some(dir.clone());
-					break;
-				}
-				if !dir.pop() {
-					break;
-				}
-			}
-			found
-		};
-		let archaeologist = if let Some(ref root) = git_root {
-			GitArchaeologist::open(root).ok()
-		} else {
-			None
-		};
-		if archaeologist.is_none() {
-			tracing::debug!("Git archaeology unavailable for workspace {:?} (no .git found)", archaeology_root);
-		}
-
- 		let mut parser = match AstParser::new() {
+		
+		let mut parser = match AstParser::new() {
 			Ok(p) => p,
 			Err(e) => {
-				tracing::error!("Failed to initialize AstParser: {}", e);
+				tracing::error!("Failed to initialize AstParser for observer: {}", e);
 				return;
 			}
 		};
-		let mut cache: std::collections::HashMap<String, (Vec<u8>, Option<(tree_sitter::Tree, tree_sitter::Language)>)> = std::collections::HashMap::new();
-		let mut feature_snapshots: std::collections::HashMap<String, Vec<AstNodeFeature>> = std::collections::HashMap::new();
-		let mut last_observer_persist = std::time::Instant::now();
-		let mut last_fsi_persist = std::time::Instant::now();
-		let mut recent_deleted_files: std::collections::VecDeque<String> = std::collections::VecDeque::with_capacity(32);
-		let mut decision_detector = DecisionDetector::new(
-			std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("rules")
-		);
-		let call_graph_for_events = call_graph.clone();
-		let workspace_root_for_events = app_config.workspace_root.clone().map(std::path::PathBuf::from);
-		fn fsi_debounce_secs() -> u64 {
-			std::env::var("MEMIX_FSI_DEBOUNCE_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(1)
-		}
-
-        while let Some(event) = rx.recv().await {
-			let cfg = config_for_events.read().await;
-			if cfg.brain_paused {
-				tracing::debug!("Brain is paused, ignoring AST daemon event");
-				continue;
-			}
-			drop(cfg); // Release the read lock before async work
-            tracing::debug!("AST Daemon Event detected: {:?}", event);
-
- 			let Some(pending_path) = pending_path.as_ref() else {
-				continue;
+		
+		tracing::info!("Multi-workspace observer event processor started");
+		
+		while let Some(tagged_event) = event_rx.recv().await {
+			let project_id = tagged_event.project_id.clone();
+			let event = tagged_event.event;
+			
+			// Check if brain is paused for this workspace
+			let (is_paused, config_snapshot) = {
+				let cfg = processor_config.read().await;
+				(cfg.brain_paused, cfg.clone())
 			};
-			let matches_pending = event.paths.iter().any(|p| p == pending_path);
-
-			// --- Option C writeback: pending.json ---
-			if matches_pending {
-				let _guard = pending_processing_lock.lock().await;
-				let _ = process_pending_brain_update(
-					storage_for_events.clone(),
-					pending_path,
-					pending_ack_path.as_deref(),
-					"watcher",
-				)
-				.await;
+			
+			if is_paused {
+				tracing::debug!("Brain is paused, ignoring event for {}", project_id);
 				continue;
 			}
-
-			// --- Observer pipeline: compute semantic diffs + dependency graph ---
-			if matches!(&event.kind, EventKind::Remove(_)) {
-				for path in &event.paths {
-					if path.exists() {
-						continue;
+			
+			tracing::debug!("Observer event for {}: {:?}", project_id, event.kind);
+			
+			// Get or create the workspace processor
+			{
+				let mut om = processor_observer_manager.lock().await;
+				// Ensure processor exists
+				if om.get_processor(&project_id).is_none() {
+					// Processor should have been created during spawn_for_workspace
+					// If missing, skip this event
+					tracing::warn!("No processor found for project {} — skipping event", project_id);
+					continue;
+				}
+				// We need to process inside the lock, so we'll handle it here
+				// Process deletion events
+				if matches!(&event.kind, EventKind::Remove(_)) {
+					for path in &event.paths {
+						om.get_processor(&project_id).unwrap().process_deletion(
+							path,
+							&processor_storage,
+							&processor_autonomous,
+							&processor_recorder,
+							&processor_call_graph,
+						).await;
 					}
-					let key = path.to_string_lossy().to_string();
-					let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-					if !AstParser::is_supported(ext) && !cache.contains_key(&key) && !feature_snapshots.contains_key(&key) {
-						continue;
+				} else {
+					// Process modification events
+					for path in &event.paths {
+						om.get_processor(&project_id).unwrap().process_modification(
+							path,
+							&mut parser,
+							&processor_storage,
+							&processor_autonomous,
+							&processor_recorder,
+							&processor_predictor,
+							&processor_call_graph,
+							&processor_agent_runtime,
+							&processor_code_dna,
+							&processor_git_insights,
+							&config_snapshot,
+						).await;
 					}
-					cache.remove(&key);
-					feature_snapshots.remove(&key);
-					{
-						let mut autonomous = autonomous_for_events.lock().await;
-						autonomous.dependency_graph.remove_file(&key);
-					}
-					while recent_deleted_files.len() >= 32 {
-						recent_deleted_files.pop_front();
-					}
-					recent_deleted_files.push_back(key.clone());
-					recorder_for_events.record_event(SessionEvent::AstMutation { file: key.clone(), nodes_changed: 0 });
-					tracing::debug!("Observer removed file from live graph: {}", key);
-
-					// ─── Skeleton cleanup on file deletion ─────────────────────
-					call_graph_for_events.lock().await.remove_file(&key);
-					let fsi_id = crate::observer::skeleton::file_skeleton_id(&key);
-					let _ = storage_for_events.delete_skeleton_entry(&project_id_for_spawn, &fsi_id).await;
-					// Delete all FuSI entries for this file (prefix match)
-					let fusi_prefix = format!("fusi::{}", crate::observer::skeleton::normalize_path(&key));
-					if let Ok(entries) = storage_for_events.get_skeleton_entries(&project_id_for_spawn).await {
-						for entry in entries {
-							if entry.id.starts_with(&fusi_prefix) {
-								let _ = storage_for_events.delete_skeleton_entry(&project_id_for_spawn, &entry.id).await;
-							}
-						}
-					}
-					tracing::debug!("Skeleton: cleaned up FSI + FuSI entries for deleted file: {}", key);
 				}
 			}
+		}
+		
+		tracing::info!("Multi-workspace observer event processor stopped");
+	});
 
-			for path in &event.paths {
-				if !path.is_file() {
-					continue;
-				}
-
-				let key = path.to_string_lossy().to_string();
-
-				// Check for package.json changes - detect new dependencies
-				let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-				if file_name == "package.json" {
-					if let Some(ref root) = workspace_root_for_events {
-						let new_deps = crate::observer::decisions::detect_new_dependencies(root, decision_detector.get_previous_deps());
-						for (name, version) in new_deps {
-							let signal = DecisionSignal::DependencyAdded {
-								name: name.clone(),
-								version: version.clone(),
-								file: key.clone(),
-							};
-							let decisions = decision_detector.process_signal(signal).await;
-							for decision in decisions {
-								// Append to the decisions array (BRAIN_KEYS.DECISIONS = "decisions.json")
-								// The panel expects an array at this key, not individual entries
-								let existing = storage_for_events.get_entry(&project_id_for_spawn, "decisions.json").await;
-								let mut arr: Vec<serde_json::Value> = match &existing {
-									Ok(e) if !e.content.is_empty() => {
-										serde_json::from_str(&e.content).unwrap_or_default()
-									},
-									_ => vec![],
-								};
-								arr.push(serde_json::json!({
-									"id": decision.id,
-									"title": decision.title,
-									"rationale": decision.rationale,
-									"alternatives": decision.alternatives,
-									"evidence": decision.evidence,
-									"confidence": decision.confidence,
-									"rule_id": decision.rule_id,
-									"triggered_by": decision.triggered_by,
-									"tags": decision.tags,
-									"created_at": decision.created_at,
-								}));
-								let entry = MemoryEntry {
-									id: "decisions.json".to_string(),
-									project_id: project_id_for_spawn.clone(),
-									kind: MemoryKind::Decision,
-									content: serde_json::to_string(&arr).unwrap_or_default(),
-									tags: vec!["decisions".to_string()],
-									source: MemorySource::AgentExtracted,
-									superseded_by: None,
-									contradicts: vec![],
-									parent_id: None,
-									caused_by: vec![],
-									enables: vec![],
-									created_at: decision.created_at,
-									updated_at: decision.created_at,
-									access_count: 0,
-									last_accessed_at: None,
-								};
-								match storage_for_events.upsert_entry(&project_id_for_spawn, entry).await {
-									Ok(_) => {
-										tracing::info!("Auto-decision recorded: {}", decision.title);
-										decision_detector.mark_recorded(decision.id.clone()).await;
-									},
-									Err(e) => tracing::warn!("Failed to save auto-decision: {}", e),
-								}
-							}
-						}
-					}
-				}
-
-				let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-				if !AstParser::is_supported(ext) {
-					continue;
-				}
-
-				let new_bytes = match tokio::fs::read(path).await {
-					Ok(b) => b,
+	// ─── Per-Workspace pending.json Poller ──────────────────────────────────────
+	// Polls pending.json for each registered workspace and processes brain writebacks.
+	// This is now workspace-aware: each workspace has its own pending.json path.
+	
+	let poller_storage = storage_backend.clone();
+	let poller_observer_manager = observer_manager.clone();
+	let poller_workspace_registry = workspace_registry.clone();
+	
+	tokio::spawn(async move {
+		let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+		let mut last_processed_mtimes: std::collections::HashMap<String, std::time::SystemTime> = std::collections::HashMap::new();
+		
+		loop {
+			interval.tick().await;
+			
+			// Get all registered workspaces
+			let workspaces: Vec<(String, String)> = {
+				let registry = poller_workspace_registry.lock().await;
+				registry.list().into_iter()
+					.map(|e| (e.project_id.clone(), e.workspace_root.clone()))
+					.collect()
+			};
+			
+			for (project_id, workspace_root) in workspaces {
+				let pending_path = std::path::PathBuf::from(&workspace_root)
+					.join(".memix")
+					.join("brain")
+					.join("pending.json");
+				
+				let metadata = match tokio::fs::metadata(&pending_path).await {
+					Ok(m) => m,
 					Err(_) => continue,
 				};
-				let new_tree = match parser.parse_file(path) {
-					Ok(t) => t,
-					Err(e) => {
-						tracing::error!("AST parse failed for {:?}: {}", path, e);
-						continue;
-					}
-				};
-				let Some(new_tree) = new_tree else { continue; };
-
-				let (old_bytes, old_tree) = cache
-					.get(&key)
-					.cloned()
-					.unwrap_or_else(|| (Vec::new(), None));
-
-				let diff = AstDiffer::compute_diff(
-					&key,
-					&parser,
-					old_tree.as_ref(),
-					&new_tree,
-					&old_bytes,
-					&new_bytes,
-					ext,
-				);
-				let new_features = parser.extract_features(&new_tree.0, new_tree.1.clone(), &new_bytes, ext);
-				let new_features_for_agents = new_features.clone();
-
-				let mut breaking_signatures: Vec<(String, String, String)> = Vec::new();
-				if let Some((old_tree_ref, old_lang)) = old_tree.as_ref() {
-					let old_features = parser.extract_features(old_tree_ref, old_lang.clone(), &old_bytes, ext);
-					let old_map: std::collections::HashMap<String, crate::observer::parser::AstNodeFeature> = old_features
-						.into_iter()
-						.map(|f| (f.name.clone(), f))
-						.collect();
-
-					for nf in &new_features {
-						if let Some(of) = old_map.get(&nf.name) {
-							let old_sig = signature_head(&of.body);
-							let new_sig = signature_head(&nf.body);
-							if !old_sig.is_empty() && !new_sig.is_empty() && old_sig != new_sig {
-								breaking_signatures.push((nf.name.clone(), old_sig, new_sig));
-							}
-						}
-					}
-				}
-
-				cache.insert(key.clone(), (new_bytes.clone(), Some(new_tree)));
-				feature_snapshots.insert(key.clone(), new_features);
-
-				let nodes_changed = diff.nodes_added.len() + diff.nodes_removed.len() + diff.nodes_modified.len();
-				recorder_for_events.record_event(SessionEvent::AstMutation { file: key.clone(), nodes_changed });
-				predictor_for_events.record_activity(&key, nodes_changed).await;
-
-				let intent = IntentEngine::classify_intent(&diff);
-				let intent_confidence = IntentEngine::confidence(&diff);
-				recorder_for_events.record_event(SessionEvent::IntentDetected {
-					intent_type: intent.as_str().to_string(),
-				});
-
-				// Filter out visibility-only changes: adding/removing pub, pub(crate), async
-				// as a prefix is not a breaking change — callers are unaffected.
-				// Only warn when the parameter list, return type, or function name actually changed.
-				let genuinely_breaking: Vec<_> = breaking_signatures.iter()
-					.filter(|(_, old_sig, new_sig)| {
-						// Strip common visibility and async prefixes before comparing
-						let normalize = |s: &str| -> String {
-							s.trim()
-							.trim_start_matches("pub(crate)")
-							.trim_start_matches("pub")
-							.trim_start_matches("async")
-							.trim_start_matches("impl")
-							.trim()
-							.to_string()
-						};
-						normalize(old_sig) != normalize(new_sig)
-					})
-					.collect();
-
-				// Only fire a breaking signature warning when:
-				// 1. We actually had a prior snapshot (old_bytes non-empty), AND
-				// 2. The old snapshot had real content (not just a cache cold-start), AND
-				// 3. There are genuine signature changes between the two versions.
-				// Without these guards, daemon startup floods the brain with false warnings
-				// because every file looks like it "changed" from empty to its current state.
-				if !old_bytes.is_empty() && !genuinely_breaking.is_empty() {
-					let now = Utc::now();
-					let details = breaking_signatures
-						.iter()
-						.map(|(name, old_sig, new_sig)| format!("- {}: '{}' -> '{}'", name, old_sig, new_sig))
-						.collect::<Vec<_>>()
-						.join("\n");
-					let warning_entry = MemoryEntry {
-						id: format!(
-							"warning_signature_{}_{}.json",
-							now.timestamp_millis(),
-							uuid::Uuid::new_v4()
-						),
-						project_id: project_id_for_spawn.clone(),
-						kind: MemoryKind::Warning,
-						content: format!(
-							"Potential breaking signature change detected in {}:\n{}",
-							key,
-							details
-						),
-						tags: vec![
-							"warning".to_string(),
-							"semantic-diff".to_string(),
-							"signature-change".to_string(),
-						],
-						source: MemorySource::FileWatcher,
-						superseded_by: None,
-						contradicts: vec![],
-						parent_id: None,
-						caused_by: vec![],
-						enables: vec![],
-						created_at: now,
-						updated_at: now,
-						access_count: 0,
-						last_accessed_at: None,
-					};
-					let _ = storage_for_events
-						.upsert_entry(&project_id_for_spawn, warning_entry)
-						.await;
-				}
-
-				let source_code = String::from_utf8_lossy(&new_bytes).to_string();
 				
-				// Optional Compiler-Grade OXC Analysis (Typescript/Javascript)
-				let is_oxc_supported = crate::observer::oxc_semantic::is_oxc_supported(ext);
-				let oxc_analysis = if is_oxc_supported && std::env::var("MEMIX_OXC_ENABLED").unwrap_or_else(|_| "true".to_string()) == "true" {
-					crate::observer::oxc_semantic::analyze_file(
-						std::path::Path::new(&key),
-						&source_code,
-						workspace_root_for_events.as_deref(),
-					)
-				} else {
-					None
+				let modified = match metadata.modified() {
+					Ok(m) => m,
+					Err(_) => continue,
 				};
 				
-				let imports = if let Some(ref analysis) = oxc_analysis {
-					// Map OXC resolved imports to string paths
-					let unresolved_relative: Vec<String> = analysis
-						.resolved_imports
-						.iter()
-						.filter(|i| i.resolved_path.is_none() && (i.specifier.starts_with('.') || i.specifier.starts_with('/')))
-						.map(|i| i.specifier.clone())
-						.collect();
-					if !unresolved_relative.is_empty() {
-						let now = Utc::now();
-						let warning_entry = MemoryEntry {
-							id: format!(
-								"warning_dead_import_{}_{}.json",
-								now.timestamp_millis(),
-								uuid::Uuid::new_v4()
-							),
-							project_id: project_id_for_spawn.clone(),
-							kind: MemoryKind::Warning,
-							content: format!(
-								"Unresolved import(s) detected in {}:\n{}",
-								key,
-								unresolved_relative
-									.iter()
-									.map(|s| format!("- {}", s))
-									.collect::<Vec<_>>()
-									.join("\n")
-							),
-							tags: vec![
-								"warning".to_string(),
-								"oxc".to_string(),
-								"dead-import".to_string(),
-							],
-							source: MemorySource::FileWatcher,
-							superseded_by: None,
-							contradicts: vec![],
-							parent_id: None,
-							caused_by: vec![],
-							enables: vec![],
-							created_at: now,
-							updated_at: now,
-							access_count: 0,
-							last_accessed_at: None,
-						};
-						let _ = storage_for_events
-							.upsert_entry(&project_id_for_spawn, warning_entry)
-							.await;
-					}
-					analysis
-						.resolved_imports
-						.iter()
-						.map(|i| i.resolved_path.clone().unwrap_or_else(|| i.specifier.clone()))
-						.collect()
-				} else {
-					extract_imports(ext, &source_code)
+				// Check if we've already processed this version
+				let should_process = match last_processed_mtimes.get(&project_id) {
+					Some(last) => modified > *last,
+					None => true,
 				};
-
-				// ─── Skeleton Index: FSI + FuSI persistence ──────────────────
-				if last_fsi_persist.elapsed() >= std::time::Duration::from_secs(fsi_debounce_secs()) {
-					last_fsi_persist = std::time::Instant::now();
-
-					// Borrow features from the snapshot (new_features was moved into feature_snapshots above)
-					if let Some(features) = feature_snapshots.get(&key) {
-						// Update call graph with this file's call sites
-						let call_symbols: Vec<(String, Vec<crate::observer::call_graph::ResolvedEdge>)> = if let Some(ref analysis) = oxc_analysis {
-							let mut oxc_calls: std::collections::HashMap<String, Vec<crate::observer::call_graph::ResolvedEdge>> = std::collections::HashMap::new();
-							for call in &analysis.calls {
-								oxc_calls.entry(call.caller_fn.clone()).or_default().push(crate::observer::call_graph::ResolvedEdge {
-									callee_file: call.callee_file.clone().unwrap_or_default(),
-									callee_symbol: call.callee_symbol.clone().unwrap_or_else(|| call.callee_expr.clone()),
-									callee_line: call.callee_line.unwrap_or(call.line),
-									is_method: call.is_method,
-								});
-							}
-							oxc_calls.into_iter().collect()
-						} else {
-							features
-								.iter()
-								.filter(|f| matches!(f.kind.as_str(), "function" | "method" | "constructor"))
-								.map(|f| (f.name.clone(), f.calls.iter().map(|s| crate::observer::call_graph::ResolvedEdge::new_unresolved(s)).collect()))
-								.collect()
-						};
-						call_graph_for_events.lock().await.update_file(&key, call_symbols);
-
-						// Build and persist FSI (always for the saved file)
-						let dep_graph_snapshot = {
-							let a = autonomous_for_events.lock().await;
-							a.dependency_graph.clone()
-						};
-						let skeleton = crate::observer::skeleton::FileSkeleton::build(
-							&key,
-							features,
-							&dep_graph_snapshot,
-							&String::from_utf8_lossy(&new_bytes),
-						);
-						let fsi_entry = skeleton.to_memory_entry(&project_id_for_spawn);
-						if let Err(e) = storage_for_events.upsert_skeleton_entry(&project_id_for_spawn, fsi_entry).await {
-							tracing::warn!("Skeleton: FSI upsert failed for {}: {}", key, e);
-						}
-
-						// FuSI: only for hot files (recently changed or direct dependency)
-						let is_hot = is_hot_file(&key, &feature_snapshots, &dep_graph_snapshot);
-						if is_hot {
-							let call_graph_snapshot = call_graph_for_events.lock().await;
-							let symbol_entries = skeleton.to_symbol_entries(&project_id_for_spawn, &call_graph_snapshot);
-							for entry in symbol_entries {
-								if let Err(e) = storage_for_events.upsert_skeleton_entry(&project_id_for_spawn, entry).await {
-									tracing::warn!("Skeleton: FuSI upsert failed: {}", e);
-								}
-							}
-						}
-
-						tracing::debug!("Skeleton: FSI persisted for {} (hot={})", key, is_hot);
-					}
+				
+				if !should_process {
+					continue;
 				}
-
-				// ─── Auto-update session_state.json with modified files ──────────────────
-				// Track file modifications for session state without requiring explicit user action
-				{
-					if let Ok(existing) = storage_for_events.get_entry(&project_id_for_spawn, "session_state.json").await {
-						let mut state: serde_json::Value = if !existing.content.is_empty() {
-							serde_json::from_str(&existing.content).unwrap_or(serde_json::json!({}))
-						} else {
-							serde_json::json!({
-								"session_number": 1,
-								"current_task": "Development in progress",
-								"progress": [],
-								"modified_files": [],
-								"last_updated": chrono::Utc::now().to_rfc3339()
-							})
-						};
-						
-						// Append to modified_files if not already there
-						if let Some(files) = state.get_mut("modified_files") {
-							if let Some(arr) = files.as_array_mut() {
-								let key_val = serde_json::json!(key);
-								if !arr.contains(&key_val) {
-									arr.push(key_val);
-								}
-							}
-						}
-						state["last_updated"] = serde_json::json!(chrono::Utc::now().to_rfc3339());
-						
-						let entry = MemoryEntry {
-							id: "session_state.json".to_string(),
-							project_id: project_id_for_spawn.clone(),
-							kind: MemoryKind::Context,
-							content: serde_json::to_string(&state).unwrap_or_default(),
-							tags: vec!["session".to_string()],
-							source: MemorySource::AgentExtracted,
-							superseded_by: None,
-							contradicts: vec![],
-							parent_id: None,
-							caused_by: vec![],
-							enables: vec![],
-							created_at: chrono::Utc::now(),
-							updated_at: chrono::Utc::now(),
-							access_count: 0,
-							last_accessed_at: None,
-						};
-						let _ = storage_for_events.upsert_entry(&project_id_for_spawn, entry).await;
-					}
-				}
-
-				let diff_for_agents = diff.clone();
-				let (intent_entry_json, related_files_for_agents, graph_snapshot_for_agents) = {
-					let mut a = autonomous_for_events.lock().await;
-					// Filter imports: only keep local file paths, not bare package names.
-					// Bare names like "vscode", "react", "path" are external packages that
-					// pollute the structural graph with nodes that skew importance scores.
-					let local_imports: Vec<String> = imports
-						.into_iter()
-						.filter(|imp| {
-							// A local file always contains a path separator or starts with .
-							imp.contains('/') || imp.contains('\\')
-						})
-						.collect();
-					a.update_dependency_graph(&key, &local_imports);
-					let missing_resolved: Vec<String> = a
-						.dependency_graph
-						.edges_out
-						.get(&key)
-						.into_iter()
-						.flat_map(|deps| deps.iter())
-						.filter(|p| p.starts_with('/') && !std::path::Path::new(p.as_str()).exists())
-						.cloned()
-						.collect();
-					if !missing_resolved.is_empty() {
-						let now = Utc::now();
-						let warning_entry = MemoryEntry {
-							id: format!(
-								"warning_orphan_dependency_{}_{}.json",
-								now.timestamp_millis(),
-								uuid::Uuid::new_v4()
-							),
-							project_id: project_id_for_spawn.clone(),
-							kind: MemoryKind::Warning,
-							content: format!(
-								"Dependency graph references missing file(s) from {}:\n{}",
-								key,
-								missing_resolved
-									.iter()
-									.map(|s| format!("- {}", s))
-									.collect::<Vec<_>>()
-									.join("\n")
-							),
-							tags: vec![
-								"warning".to_string(),
-								"observer".to_string(),
-								"orphan-dependency".to_string(),
-							],
-							source: MemorySource::FileWatcher,
-							superseded_by: None,
-							contradicts: vec![],
-							parent_id: None,
-							caused_by: vec![],
-							enables: vec![],
-							created_at: now,
-							updated_at: now,
-							access_count: 0,
-							last_accessed_at: None,
-						};
-						let _ = storage_for_events
-							.upsert_entry(&project_id_for_spawn, warning_entry)
-							.await;
-					}
-					let related_files = {
-						let mut files = Vec::new();
-						if let Some(deps) = a.dependency_graph.edges_out.get(&key) {
-							files.extend(deps.iter().cloned());
-						}
-						if let Some(deps) = a.dependency_graph.edges_in.get(&key) {
-							files.extend(deps.iter().cloned());
-						}
-						files.sort();
-						files.dedup();
-						files.truncate(8);
-						files
-					};
-					let preloaded_memory_ids = vec![
-						"observer_graph.json".to_string(),
-						"observer_changes.json".to_string(),
-						"file_map.json".to_string(),
-						"known_issues.json".to_string(),
-					];
-
-					let rationale = vec![
-						format!("intent={} confidence={:.2}", intent.as_str(), intent_confidence),
-						format!("related_files={}", related_files.len()),
-						format!("nodes_changed={}", nodes_changed),
-					];
-
-					let token_weight = TokenEngine::count_tokens(&format!(
-						"{}\n{}\n{}",
-						key,
-						related_files.join("\n"),
-						rationale.join("\n")
-					))
-						.unwrap_or(0);
-					predictor_for_events.preload_context(
-						&key,
-						preloaded_memory_ids.clone(),
-						related_files.clone(),
-						token_weight,
-						intent.as_str().to_string(),
-						intent_confidence,
-						rationale.clone(),
-					).await;
-					let intent_entry_json = predictor_for_events
-						.get_cached_context(&key)
-						.await
-						.and_then(|snapshot| serde_json::to_string_pretty(&snapshot).ok());
-					a.record_change(key.clone(), diff);
-					(intent_entry_json, related_files, a.dependency_graph.clone())
-				};
-
-				let recent_change_files = {
-					let a = autonomous_for_events.lock().await;
-					a.change_history
-						.iter()
-						.rev()
-						.take(20)
-						.map(|change| change.file.clone())
-						.collect::<Vec<_>>()
-				};
-				let reports = {
-					let mut runtime = agent_runtime_for_events.lock().await;
-					runtime.process_file_save(&FileSaveAgentContext {
-						project_id: project_id_for_spawn.clone(),
-						file_path: key.clone(),
-						file_content: String::from_utf8_lossy(&new_bytes).to_string(),
-						diff: diff_for_agents,
-						features: new_features_for_agents,
-						dependency_graph: graph_snapshot_for_agents,
-						intent_type: intent.as_str().to_string(),
-						intent_confidence,
-						breaking_signatures: breaking_signatures.clone(),
-						recent_change_files,
-					})
-				};
-				for report in reports {
-					let kind = if report.severity >= crate::agents::AgentSeverity::Warning {
-						MemoryKind::Warning
-					} else {
-						MemoryKind::Context
-					};
-					let entry = MemoryEntry {
-						id: report.entry_id.clone(),
-						project_id: project_id_for_spawn.clone(),
-						kind,
-						content: serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string()),
-						tags: vec![
-							"agent".to_string(),
-							report.agent_name.to_lowercase(),
-							intent.as_str().to_string(),
-						],
-						source: MemorySource::AgentExtracted,
-						superseded_by: None,
-						contradicts: vec![],
-						parent_id: None,
-						caused_by: vec![],
-						enables: related_files_for_agents.clone(),
-						created_at: report.generated_at,
-						updated_at: report.generated_at,
-						access_count: 0,
-						last_accessed_at: None,
-					};
-					let _ = storage_for_events
-						.upsert_entry(&project_id_for_spawn, entry)
-						.await;
-					if let Some(output_entry) = build_agent_output_entry(&project_id_for_spawn, &report) {
-						let _ = storage_for_events
-							.upsert_entry(&project_id_for_spawn, output_entry)
-							.await;
-					}
-				}
-
-				// Persist observer snapshots into brain keys (throttled)
-				if last_observer_persist.elapsed() >= std::time::Duration::from_secs(2) {
-					last_observer_persist = std::time::Instant::now();
-					let recent_reports = {
-						let runtime = agent_runtime_for_events.lock().await;
-						runtime.recent_reports()
-					};
-					let (graph_json, changes_json, dna_json, dna_snapshot, git_json, git_snapshot, file_map_json, known_issues_json) = {
-						let a = autonomous_for_events.lock().await;
-						let graph_json = serde_json::to_string_pretty(&a.dependency_graph)
-							.unwrap_or_else(|_| "{}".to_string());
-						let changes: Vec<_> = a
-							.change_history
-							.iter()
-							.rev()
-							.take(25)
-							.map(|c| c.diff.clone())
-							.collect();
-						let changes_json = serde_json::to_string_pretty(&changes)
-							.unwrap_or_else(|_| "[]".to_string());
-						let recent_change_files = a
-							.change_history
-							.iter()
-							.rev()
-							.take(50)
-							.map(|c| c.file.clone())
-							.collect::<Vec<_>>();
-						let dna_rules = DnaRuleConfig::resolve_for_workspace(&dna_rules_root);
-						let tracked_git_files = recent_change_files
-							.iter()
-							.cloned()
-							.chain(feature_snapshots.keys().take(12).cloned())
-							.collect::<std::collections::HashSet<_>>()
-							.into_iter()
-							.collect::<Vec<_>>();
-
-						let snapshot = archaeologist
-							.as_ref()
-							.and_then(|arch| arch.project_insights(&tracked_git_files, 75).ok());
-						let json = snapshot.as_ref().and_then(|s| serde_json::to_string_pretty(s).ok());
-						let (git_json, git_snapshot) = (json, snapshot);
-
-						let snapshot = ProjectCodeDna::summarize(
-							&feature_snapshots,
-							&a.dependency_graph,
-							&recent_change_files,
-							&dna_rules,
-						);
-						let json = serde_json::to_string_pretty(&snapshot).ok();
-						let (dna_json, dna_snapshot) = (json, Some(snapshot));
-
-						let file_map_json = serde_json::to_string_pretty(&build_file_map_snapshot(&feature_snapshots, &a.dependency_graph))
-							.unwrap_or_else(|_| "{}".to_string());
-						let known_issues_json = serde_json::to_string_pretty(&build_known_issues_snapshot(&recent_reports, &recent_deleted_files))
-							.unwrap_or_else(|_| "[]".to_string());
-						(
-							Some(graph_json),
-							Some(changes_json),
-							dna_json,
-							dna_snapshot,
-							git_json,
-							git_snapshot,
-							Some(file_map_json),
-							Some(known_issues_json),
-						)
-					};
-
-					if let Some(dna_snapshot) = dna_snapshot {
-						{
-							let mut shared_dna = code_dna_for_events.lock().await;
-							*shared_dna = dna_snapshot;
-						}
-					}
-					if let Some(git_snapshot) = git_snapshot {
-						{
-							let mut shared_git = git_insights_for_events.lock().await;
-							*shared_git = git_snapshot;
-						}
-					}
-
-					if let (Some(graph_json), Some(changes_json), Some(dna_json), Some(file_map_json), Some(known_issues_json)) = (graph_json, changes_json, dna_json, file_map_json, known_issues_json) {
-						let graph_entry = make_observer_entry(
-							&project_id_for_spawn,
-							"observer_graph.json",
-							graph_json,
-							vec!["observer".to_string(), "graph".to_string()],
-							MemorySource::FileWatcher,
-							MemoryKind::Context,
-						);
-						let changes_entry = make_observer_entry(
-							&project_id_for_spawn,
-							"observer_changes.json",
-							changes_json,
-							vec!["observer".to_string(), "changes".to_string()],
-							MemorySource::FileWatcher,
-							MemoryKind::Context,
-						);
-						let dna_entry = make_observer_entry(
-							&project_id_for_spawn,
-							"observer_dna.json",
-							dna_json,
-							vec!["observer".to_string(), "dna".to_string(), "architecture".to_string()],
-							MemorySource::FileWatcher,
-							MemoryKind::Context,
-						);
-						let intent_entry = intent_entry_json.as_ref().map(|intent_json| {
-							make_observer_entry(
-								&project_id_for_spawn,
-								"observer_intent.json",
-								intent_json.clone(),
-								vec!["observer".to_string(), "intent".to_string(), "predictive".to_string()],
-								MemorySource::FileWatcher,
-								MemoryKind::Context,
-							)
-						});
-						let git_entry = git_json.as_ref().map(|git_json| {
-							make_observer_entry(
-								&project_id_for_spawn,
-								"observer_git.json",
-								git_json.clone(),
-								vec!["observer".to_string(), "git".to_string(), "archaeology".to_string()],
-								MemorySource::GitArchaeology,
-								MemoryKind::Context,
-							)
-						});
-						let file_map_entry = make_observer_entry(
-							&project_id_for_spawn,
-							"file_map",
-							file_map_json,
-							vec!["observer".to_string(), "file_map".to_string(), "generated".to_string()],
-							MemorySource::FileWatcher,
-							MemoryKind::Context,
-						);
-						let known_issues_entry = make_observer_entry(
-							&project_id_for_spawn,
-							"known_issues",
-							known_issues_json,
-							vec!["observer".to_string(), "known_issues".to_string(), "generated".to_string()],
-							MemorySource::FileWatcher,
-							MemoryKind::Warning,
-						);
-
-						let _ = storage_for_events
-							.upsert_entry(&project_id_for_spawn, graph_entry)
-							.await;
-						let _ = storage_for_events
-							.upsert_entry(&project_id_for_spawn, dna_entry)
-							.await;
-						let _ = storage_for_events
-							.upsert_entry(&project_id_for_spawn, changes_entry)
-							.await;
-						let _ = storage_for_events
-							.upsert_entry(&project_id_for_spawn, file_map_entry)
-							.await;
-						let _ = storage_for_events
-							.upsert_entry(&project_id_for_spawn, known_issues_entry)
-							.await;
-						if let Some(intent_entry) = intent_entry {
-							let _ = storage_for_events
-								.upsert_entry(&project_id_for_spawn, intent_entry)
-								.await;
-						}
-						if let Some(git_entry) = git_entry {
-							let _ = storage_for_events
-								.upsert_entry(&project_id_for_spawn, git_entry)
-								.await;
-						}
-					}
+				
+				// Process pending.json for this workspace
+				if process_pending_brain_update(
+					poller_storage.clone(),
+					&pending_path,
+					Some(&pending_path.with_extension("ack.json")),
+					&format!("poller:{}", project_id),
+				).await {
+					last_processed_mtimes.insert(project_id, modified);
 				}
 			}
 		}
@@ -1923,31 +1173,4 @@ async fn main() -> anyhow::Result<()> {
 	std::future::pending::<()>().await;
 	#[allow(unreachable_code)]
 	Ok(())
-}
-
-/// A file is "hot" if it's recently changed (in feature_snapshots) or has
-/// direct dependencies in the project graph. Only hot files get FuSI entries
-/// to keep skeleton storage bounded.
-fn max_hot_files() -> usize {
-    std::env::var("MEMIX_MAX_HOT_FILES").ok().and_then(|s| s.parse().ok()).unwrap_or(30)
-}
-fn is_hot_file(
-	file_path: &str,
-	feature_snapshots: &std::collections::HashMap<String, Vec<AstNodeFeature>>,
-	graph: &crate::observer::graph::DependencyGraph,
-) -> bool {
-	// If the file has feature snapshots, it was recently parsed
-	if feature_snapshots.contains_key(file_path) {
-		// But only if we haven't exceeded the hot file cap
-		if feature_snapshots.len() <= max_hot_files() {
-			return true;
-		}
-	}
-	// Files with high fan-in (many dependents) are always hot
-	if let Some(deps) = graph.edges_in.get(file_path) {
-		if deps.len() >= 3 {
-			return true;
-		}
-	}
-	false
 }

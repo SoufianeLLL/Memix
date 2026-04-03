@@ -15,6 +15,12 @@ export class BrainManager {
         return this.projectId;
     }
 
+    /// Update projectId when switching workspaces (multi-tenant)
+    setProjectId(projectId: string): void {
+        this.projectId = projectId;
+        this.writeLog = []; // Reset write log for new workspace
+    }
+
     getPrefix(): string {
         return `brain:${this.projectId}`;
     }
@@ -275,7 +281,7 @@ export class BrainManager {
             createdAt: existingMeta?.createdAt || new Date().toISOString(),
             lastAccessed: new Date().toISOString(),
             totalSessions: existingMeta?.totalSessions || 0,
-            brainVersion: '1.4.4',
+            brainVersion: '1.5.0',
             sizeBytes: sizeInfo.totalBytes
         };
 

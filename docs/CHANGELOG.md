@@ -6,18 +6,34 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ---
 
-## [1.4.4-beta] (Daemon: 0.7.2-beta) — 2026-04-03
+## [1.5.0] (Daemon: 0.8.0-beta) — 2026-04-03
 ### Added
-- **Multi-Tenant Workspace Support:** Memix now supports multiple VS Code windows/projects simultaneously without daemon restarts.
-  - **Workspace Registry:** Single daemon instance tracks all open workspaces and their state.
+- **Multi-IDE Support:** Memix now works across multiple AI IDEs simultaneously (VS Code, Cursor, Windsurf, Claude Code, etc.).
+  - **Shared Daemon Binary:** All IDEs share the same daemon binary at `~/.memix/bin/` instead of each downloading their own copy.
+  - **Active Workspace Context:** Health and config endpoints now return data for the currently active (focused) workspace.
+  - **Per-Project Config:** `daemon_config.json` is now read from the active workspace's `.memix/` directory.
+  - **Workspace Registry API:** `/api/v1/workspace/register`, `/unregister`, `/activate`, `/list` for workspace lifecycle management.
   - **Per-Workspace Indexing:** Background indexer spawns independently for each registered workspace.
   - **Instant Project Switching:** ~0ms switch time when changing between projects - no daemon restart needed.
   - **Window Focus Tracking:** Active workspace updates automatically when switching VS Code windows.
-  - **New API Endpoints:** `/api/v1/workspace/register`, `/unregister`, `/activate`, `/list` for workspace lifecycle management.
-  - **Health Endpoint Enhancement:** `/health` now returns `workspace_root` and `project_id` for proper project detection.
 
 ### Fixed
+- **Per-Workspace Brain Pause:** Brain pause/resume now applies to the active workspace only, not globally across all IDEs/windows.
+- **Intelligence Metrics Per-Project:** Decisions, Core Facts, Patterns, and Anti-Patterns now show correct counts for the active workspace.
+- **Session State Per-Project:** Last Updated and Current Task now reflect the active workspace's state.
+- **Config Path Bug:** Fixed `/control/status` and health endpoint returning config path from first opened project instead of currently active project.
+
+### Known Limitations
+- **Observer Data (Code DNA, Git Insights, Call Graph):** These are currently global singletons. Per-workspace observer data is planned for a future release.
+- **Token Intelligence (Cache Efficiency):** Token stats (session compilations, cache efficiency, compression ratio) are currently global across all workspaces. Per-workspace token tracking is planned for a future release.
+- **Tasks:** Pending tasks count requires the `tasks.json` brain file to be populated. This is a manual process or requires rules-based automation.
+
+---
+
+## [1.4.4-beta] (Daemon: 0.7.2-beta) — 2026-04-03
+### Fixed
 - **Project Sticking Bug:** Fixed critical bug where the first initialized project would "stick" to the daemon, preventing subsequent projects from being properly initialized. The daemon now correctly handles multiple projects through the workspace registry instead of restarting for each project change.
+- **Redundant Daemon Downloads:** Fixed issue where each IDE (VS Code, Cursor, Windsurf, etc.) downloaded its own copy of the daemon binary. The daemon is now stored in a shared location `~/.memix/bin/` so all IDEs use the same binary.
 
 ---
 

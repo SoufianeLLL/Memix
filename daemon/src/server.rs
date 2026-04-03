@@ -36,6 +36,7 @@ use crate::observer::importance::{compute_importance, compute_blast_radius};
 use crate::recorder::flight::{FlightRecorder, FlightRecord};
 use crate::workspace_registry::{WorkspaceRegistry, RegistrySnapshot};
 use crate::indexer_manager::IndexerManager;
+use crate::observer::observer_manager::ObserverManager;
 
 pub struct AppState {
     pub storage: Arc<dyn StorageBackend + Send + Sync>,
@@ -50,6 +51,8 @@ pub struct AppState {
 	pub workspace_registry: Arc<tokio::sync::Mutex<WorkspaceRegistry>>,
 	/// Multi-workspace indexer manager - spawns indexers per workspace
 	pub indexer_manager: Arc<tokio::sync::Mutex<IndexerManager>>,
+	/// Multi-workspace observer manager - spawns file watchers per workspace
+	pub observer_manager: Arc<tokio::sync::Mutex<ObserverManager>>,
 	/// Legacy single-workspace fields (kept for backward compatibility)
 	pub workspace_root: Option<String>,
 	pub active_project_id: Option<String>,
@@ -181,9 +184,9 @@ pub async fn get_patterns(
             tracing::info!("Pattern scan complete: {} files, {} functions, {} patterns found", 
                 r.total_files_scanned, r.total_functions_analyzed, r.patterns.len());
             
-            // Persist to BRAIN_KEYS.PATTERNS ("patterns.json") so panel metrics work
+            // Persist to BRAIN_KEYS.PATTERNS ("patterns") so panel metrics work
             let patterns_entry = MemoryEntry {
-                id: "patterns.json".to_string(),
+                id: "patterns".to_string(),
                 project_id: project_id.clone(),
                 kind: MemoryKind::Context,
                 content: serde_json::to_string(&serde_json::json!({
@@ -383,6 +386,7 @@ pub fn build_router(
     git_insights: Arc<tokio::sync::Mutex<ProjectGitInsights>>,
     workspace_registry: Arc<tokio::sync::Mutex<WorkspaceRegistry>>,
     indexer_manager: Arc<tokio::sync::Mutex<IndexerManager>>,
+    observer_manager: Arc<tokio::sync::Mutex<ObserverManager>>,
     workspace_root: Option<String>,
     active_project_id: Option<String>,
     configured_team_id: Option<String>,
@@ -404,6 +408,7 @@ pub fn build_router(
         git_insights,
         workspace_registry,
         indexer_manager,
+        observer_manager,
         workspace_root,
         active_project_id,
         configured_team_id,
@@ -661,24 +666,30 @@ async fn redis_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 /// when a different project is opened and restart the daemon accordingly.
 async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 	let config = state.config.read().await.clone();
-	let workspace_root = state.workspace_root.clone();
-	let project_id = state.active_project_id.clone();
 	
-	if config.brain_paused {
-		(StatusCode::OK, Json(serde_json::json!({
-			"status": "paused",
-			"message": "Brain is sleeping",
-			"workspace_root": workspace_root,
-			"project_id": project_id
-		}))).into_response()
+	// Get active workspace from registry (multi-tenant)
+	let registry = state.workspace_registry.lock().await;
+	let (workspace_root, project_id, brain_paused) = if let Some(active) = registry.get_active() {
+		let entry = registry.get(&active.project_id);
+		(
+			Some(active.workspace_root.clone()), 
+			Some(active.project_id.clone()),
+			entry.map(|e| e.brain_paused).unwrap_or(false)
+		)
 	} else {
-    	(StatusCode::OK, Json(serde_json::json!({
-			"status": "healthy",
-			"message": "Memix Daemon is healthy",
-			"workspace_root": workspace_root,
-			"project_id": project_id
-		}))).into_response()
-	}
+		// Fall back to legacy single-workspace fields
+		(state.workspace_root.clone(), state.active_project_id.clone(), config.brain_paused)
+	};
+	drop(registry);
+	
+	(StatusCode::OK, Json(serde_json::json!({
+		"status": "ok",
+		"message": "Memix daemon is running",
+		"workspace_root": workspace_root,
+		"project_id": project_id,
+		"brain_paused": brain_paused,
+		"config_path": DaemonConfig::config_path(workspace_root.as_deref()).to_string_lossy()
+	})))
 }
 
 // ============================================================================
@@ -723,6 +734,13 @@ async fn register_workspace(
             req.project_id.clone(),
             req.workspace_root.clone(),
         );
+        
+        // Spawn a file watcher for this workspace
+        let mut observer_manager = state.observer_manager.lock().await;
+        observer_manager.spawn_for_workspace(
+            req.project_id.clone(),
+            req.workspace_root.clone(),
+        );
     }
     
     // Return the registry snapshot
@@ -743,6 +761,12 @@ async fn unregister_workspace(
     {
         let mut indexer_manager = state.indexer_manager.lock().await;
         indexer_manager.cancel(&req.project_id);
+    }
+    
+    // Cancel the observer for this workspace
+    {
+        let mut observer_manager = state.observer_manager.lock().await;
+        observer_manager.cancel(&req.project_id);
     }
     
     let mut registry = state.workspace_registry.lock().await;
@@ -790,26 +814,72 @@ async fn list_workspaces(State(state): State<Arc<AppState>>) -> impl IntoRespons
 }
 
 async fn control_pause(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+	// Get active workspace and update per-workspace pause state
+	let mut registry = state.workspace_registry.lock().await;
+	let active_project = registry.get_active().map(|a| a.project_id.clone());
+	if let Some(project_id) = active_project {
+		if let Some(entry) = registry.get_mut(&project_id) {
+			entry.brain_paused = true;
+			tracing::info!("Brain operations paused for workspace {} via /control/pause", project_id);
+			return (StatusCode::OK, Json(serde_json::json!({"paused": true, "project_id": project_id})));
+		}
+	}
+	drop(registry);
+	
+	// Fallback to global config for backward compatibility
     let mut config = state.config.write().await;
     config.brain_paused = true;
     config.save(state.workspace_root.as_deref());
-    tracing::info!("Brain operations paused globally via /control/pause");
-    (StatusCode::OK, Json(config.clone())).into_response()
+    tracing::info!("Brain operations paused globally via /control/pause (fallback)");
+    (StatusCode::OK, Json(serde_json::json!({"paused": true})))
 }
 
 async fn control_resume(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+	// Get active workspace and update per-workspace pause state
+	let mut registry = state.workspace_registry.lock().await;
+	let active_project = registry.get_active().map(|a| a.project_id.clone());
+	if let Some(project_id) = active_project {
+		if let Some(entry) = registry.get_mut(&project_id) {
+			entry.brain_paused = false;
+			tracing::info!("Brain operations resumed for workspace {} via /control/resume", project_id);
+			return (StatusCode::OK, Json(serde_json::json!({"resumed": true, "project_id": project_id})));
+		}
+	}
+	drop(registry);
+	
+	// Fallback to global config for backward compatibility
     let mut config = state.config.write().await;
     config.brain_paused = false;
     config.save(state.workspace_root.as_deref());
-    tracing::info!("Brain operations resumed globally via /control/resume");
-    (StatusCode::OK, Json(config.clone())).into_response()
+    tracing::info!("Brain operations resumed globally via /control/resume (fallback)");
+    (StatusCode::OK, Json(serde_json::json!({"resumed": true})))
 }
 
 
 async fn control_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+	// Get active workspace for config path and pause state
+	let (workspace_root, brain_paused, project_id) = {
+		let registry = state.workspace_registry.lock().await;
+		if let Some(active) = registry.get_active() {
+			let entry = registry.get(&active.project_id);
+			(
+				Some(active.workspace_root.clone()),
+				entry.map(|e| e.brain_paused).unwrap_or(false),
+				Some(active.project_id.clone())
+			)
+		} else {
+			(state.workspace_root.clone(), state.config.read().await.brain_paused, state.active_project_id.clone())
+		}
+	};
+	
     let config = state.config.read().await.clone();
-    let path = DaemonConfig::config_path(state.workspace_root.as_deref());
-    (StatusCode::OK, Json(serde_json::json!({"config": config, "config_path": path.to_string_lossy()}))).into_response()
+    let path = DaemonConfig::config_path(workspace_root.as_deref());
+    (StatusCode::OK, Json(serde_json::json!({
+		"config": config, 
+		"config_path": path.to_string_lossy(),
+		"brain_paused": brain_paused,
+		"project_id": project_id
+	}))).into_response()
 }
 
 async fn initiate_license(
@@ -1369,7 +1439,7 @@ async fn purge_project(
 async fn daemon_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "status": "healthy",
-        "version": "0.7.2-beta",
+        "version": "0.8.0-beta",
         "workspace_root": state.workspace_root,
         "project_id": state.active_project_id,
         "features": [

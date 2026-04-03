@@ -9,6 +9,31 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
+/// Per-workspace context holding all project-specific state
+#[derive(Debug, Clone)]
+pub struct WorkspaceContext {
+    pub project_id: String,
+    pub workspace_root: String,
+    pub data_dir: PathBuf,
+    /// When this workspace was last active
+    pub last_active_at: Instant,
+    /// Whether background indexing is complete
+    pub indexing_complete: bool,
+}
+
+impl WorkspaceContext {
+    pub fn new(project_id: String, workspace_root: String) -> Self {
+        let data_dir = PathBuf::from(&workspace_root).join(".memix");
+        Self {
+            project_id,
+            workspace_root,
+            data_dir,
+            last_active_at: Instant::now(),
+            indexing_complete: false,
+        }
+    }
+}
+
 /// Per-workspace state tracked by the daemon
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceEntry {
@@ -20,6 +45,9 @@ pub struct WorkspaceEntry {
     pub indexing_complete: bool,
     /// Number of files indexed
     pub files_indexed: u64,
+    /// Whether brain operations are paused for this workspace (per-workspace, not global)
+    #[serde(default)]
+    pub brain_paused: bool,
 }
 
 /// Active workspace context - which project is currently "focused"
@@ -38,6 +66,8 @@ pub struct WorkspaceRegistry {
     active: Option<ActiveContext>,
     /// Per-workspace indexer handles for cancellation
     indexer_handles: HashMap<String, tokio::task::JoinHandle<()>>,
+    /// Per-workspace observer handles for cancellation (file watchers)
+    observer_handles: HashMap<String, tokio::task::JoinHandle<()>>,
 }
 
 impl WorkspaceRegistry {
@@ -46,6 +76,7 @@ impl WorkspaceRegistry {
             workspaces: HashMap::new(),
             active: None,
             indexer_handles: HashMap::new(),
+            observer_handles: HashMap::new(),
         }
     }
 
@@ -64,6 +95,7 @@ impl WorkspaceRegistry {
             last_active_at: now,
             indexing_complete: false,
             files_indexed: 0,
+            brain_paused: false,
         });
         
         // Set as active if this is the first workspace or update timestamp
@@ -82,6 +114,11 @@ impl WorkspaceRegistry {
     pub fn unregister(&mut self, project_id: &str) -> Option<WorkspaceEntry> {
         // Cancel any running indexer for this workspace
         if let Some(handle) = self.indexer_handles.remove(project_id) {
+            handle.abort();
+        }
+        
+        // Cancel any running observer for this workspace
+        if let Some(handle) = self.observer_handles.remove(project_id) {
             handle.abort();
         }
         
@@ -143,6 +180,16 @@ impl WorkspaceRegistry {
     /// Store an indexer handle for later cancellation
     pub fn set_indexer_handle(&mut self, project_id: String, handle: tokio::task::JoinHandle<()>) {
         self.indexer_handles.insert(project_id, handle);
+    }
+    
+    /// Store an observer handle for later cancellation
+    pub fn set_observer_handle(&mut self, project_id: String, handle: tokio::task::JoinHandle<()>) {
+        self.observer_handles.insert(project_id, handle);
+    }
+    
+    /// Get observer handle for a workspace
+    pub fn get_observer_handle(&self, project_id: &str) -> Option<&tokio::task::JoinHandle<()>> {
+        self.observer_handles.get(project_id)
     }
 
     /// Mark indexing complete for a workspace

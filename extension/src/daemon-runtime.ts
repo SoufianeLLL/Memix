@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import * as crypto from 'crypto';
 import * as http from 'http';
 import * as https from 'https';
@@ -65,11 +66,14 @@ export class DaemonRuntimeManager {
 	}
 
 	static getPaths(context: vscode.ExtensionContext) {
-		const storageRoot = context.globalStorageUri.fsPath;
-		const binDir = path.join(storageRoot, 'bin');
+		// Use shared ~/.memix/bin location so all IDEs (VS Code, Cursor, Windsurf, etc.)
+		// share the same daemon binary instead of each downloading their own copy.
+		const homeDir = os.homedir();
+		const sharedRoot = path.join(homeDir, '.memix');
+		const binDir = path.join(sharedRoot, 'bin');
 		const binaryPath = path.join(binDir, process.platform === 'win32' ? 'memix-daemon.exe' : 'memix-daemon');
-		const versionFile = path.join(storageRoot, 'daemon-version.txt');
-		return { storageRoot, binDir, binaryPath, versionFile };
+		const versionFile = path.join(sharedRoot, 'daemon-version.txt');
+		return { storageRoot: sharedRoot, binDir, binaryPath, versionFile };
 	}
 
 	static getLocalDevBinaryPath(extensionPath: string): string | null {
