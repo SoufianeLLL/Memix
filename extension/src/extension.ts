@@ -575,11 +575,6 @@ export async function activate(context: vscode.ExtensionContext) {
 			panelProvider?.getWebView()?.postMessage({ command: 'showLoading', text: 'Initializing brain...' });
 			try {
 				const redisUrl = await secretManager.getSecret('redisUrl');
-				if (!redisUrl) {
-					vscode.window.showWarningMessage('Connect to Redis first');
-					panelProvider?.sendUpdate();
-					return;
-				}
 
 				let projectId = config.get<string>('projectId');
 				if (!projectId) {
@@ -593,9 +588,9 @@ export async function activate(context: vscode.ExtensionContext) {
 					}
 				}
 
-				// Generate rules via Rust daemon
+				// Generate rules via Rust daemon (Redis optional - SQLite is primary)
 				const ide = detectIDE();
-				await MemoryClient.generateRules(projectId, redisUrl, ide, workspaceRoot);
+				await MemoryClient.generateRules(projectId, redisUrl || '', ide, workspaceRoot);
 
 				// Check if the brain is paused before attempting writes.
 				// Init is an explicit user action, so we auto-resume rather than
@@ -954,7 +949,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			if (redisUrl) {
 				const ide = detectIDE();
 				try {
-					await MemoryClient.generateRules(projectId, redisUrl, ide, workspaceRoot);
+					await MemoryClient.generateRules(projectId, redisUrl || '', ide, workspaceRoot);
 				} catch (e) {
 					// Rules might already exist, ignore
 				}
