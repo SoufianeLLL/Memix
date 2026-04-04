@@ -6,6 +6,26 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ---
 
+## [1.8.0] (Daemon: 0.11.0-beta) — 2026-04-04
+### Added
+- **Brain Database in Workspace:** Brain database is now stored inside each project's workspace at `{workspace_root}/.memix/brain.db`.
+  - Each project has complete isolation - switching IDE windows automatically uses the correct project brain.
+  - No global database - brain travels with the project (git-ignored by default).
+  - Fast multi-window switching with per-workspace brain storage.
+- **Brain Database Size API:** New endpoint `GET /api/v1/brain/size/:project_id` returns SQLite database file size.
+
+### Changed
+- **UI: Brain Database Size:** Replaced "Redis Dataset" panel metric with "Brain Database".
+  - Shows actual SQLite `.memix/brain.db` file size with human-readable formatting.
+  - Smart units: displays KB, MB, or GB based on size (e.g., "1.5 MB / 100 MB" instead of "1536 KB / 102400 KB").
+- **Dependencies:** Switched `sqlx` from `native-tls` to `rustls` for OpenSSL-free builds.
+
+### Fixed
+- **OpenSSL Build Error:** Fixed `openssl-sys` compilation failure on Linux by using `runtime-tokio-rustls`.
+- **Per-Project Database:** Fixed bug where all workspaces shared the first-initialized project's database.
+
+---
+
 ## [1.7.0] (Daemon: 0.10.0-beta) — 2026-04-04
 ### Added
 - **SQLite Primary Storage:** Replaced Redis as primary storage with SQLite for 50-200× faster local reads.

@@ -14,11 +14,13 @@ use crate::brain::schema::{MemoryEntry, MemoryKind, MemorySource};
 use super::{StorageBackend, RedisStats, TeamSyncReport};
 
 /// SQLite storage backend - fast local storage with WAL mode.
-/// Each project has its own database at {workspace}/.memix/brain.db
+/// Each project has its own database at {workspace_root}/.memix/brain.db
 pub struct SqliteStorage {
     /// Connection pools keyed by project_id
     pools: RwLock<std::collections::HashMap<String, SqlitePool>>,
-    /// Default data directory for projects without workspace_root
+    /// Workspace roots keyed by project_id (for per-project database location)
+    workspace_roots: RwLock<std::collections::HashMap<String, PathBuf>>,
+    /// Fallback data directory for projects without workspace_root
     default_data_dir: PathBuf,
 }
 
@@ -29,8 +31,36 @@ impl SqliteStorage {
         
         Ok(Self {
             pools: RwLock::new(std::collections::HashMap::new()),
+            workspace_roots: RwLock::new(std::collections::HashMap::new()),
             default_data_dir,
         })
+    }
+    
+    /// Set workspace root for a project (called when workspace is registered)
+    pub async fn set_workspace_root(&self, project_id: &str, workspace_root: PathBuf) {
+        let mut roots = self.workspace_roots.write().await;
+        roots.insert(project_id.to_string(), workspace_root);
+        tracing::info!("SqliteStorage: set workspace root for {} -> {:?}", project_id, roots.get(project_id));
+    }
+    
+    /// Get database path for a project: {workspace_root}/.memix/brain.db
+    async fn get_db_path(&self, project_id: &str) -> PathBuf {
+        let roots = self.workspace_roots.read().await;
+        if let Some(root) = roots.get(project_id) {
+            root.join(".memix").join("brain.db")
+        } else {
+            // Fallback to global location if no workspace root set
+            self.default_data_dir.join(project_id).join("brain.db")
+        }
+    }
+    
+    /// Get the size of the brain database file for a project
+    pub async fn get_brain_db_size(&self, project_id: &str) -> u64 {
+        let db_path = self.get_db_path(project_id).await;
+        match std::fs::metadata(&db_path) {
+            Ok(metadata) => metadata.len(),
+            Err(_) => 0,
+        }
     }
     
     /// Get or create a connection pool for a project
@@ -43,11 +73,11 @@ impl SqliteStorage {
             }
         }
         
-        // Create new pool - database stored in ~/.memix/data/{project_id}/brain.db
-        let db_dir = self.default_data_dir.join(project_id);
-        std::fs::create_dir_all(&db_dir)?;
+        // Create new pool - database stored at {workspace_root}/.memix/brain.db
+        let db_path = self.get_db_path(project_id).await;
+        let db_dir = db_path.parent().unwrap_or(&db_path);
+        std::fs::create_dir_all(db_dir)?;
         
-        let db_path = db_dir.join("brain.db");
         let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
         
         let pool = SqlitePoolOptions::new()
@@ -208,6 +238,10 @@ impl SqliteStorage {
 
 #[async_trait]
 impl StorageBackend for SqliteStorage {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    
     async fn get_entries(&self, project_id: &str) -> Result<Vec<MemoryEntry>> {
         let pool = self.get_pool(project_id).await?;
         let rows = sqlx::query(
@@ -316,8 +350,10 @@ impl StorageBackend for SqliteStorage {
     
     async fn export_project_to_json(&self, project_id: &str) -> Result<u64> {
         let entries = self.get_entries(project_id).await?;
-        let db_dir = self.default_data_dir.join(project_id);
-        let mirror_dir = db_dir.join("mirror");
+        // Mirror stored at {workspace_root}/.memix/mirror/
+        let mirror_dir = self.get_db_path(project_id).await.parent()
+            .map(|p| p.join("mirror"))
+            .unwrap_or_else(|| self.default_data_dir.join(project_id).join("mirror"));
         std::fs::create_dir_all(&mirror_dir)?;
         
         let mut written: u64 = 0;
@@ -332,8 +368,10 @@ impl StorageBackend for SqliteStorage {
     }
     
     async fn import_project_from_json(&self, project_id: &str) -> Result<u64> {
-        let db_dir = self.default_data_dir.join(project_id);
-        let mirror_dir = db_dir.join("mirror");
+        // Mirror stored at {workspace_root}/.memix/mirror/
+        let mirror_dir = self.get_db_path(project_id).await.parent()
+            .map(|p| p.join("mirror"))
+            .unwrap_or_else(|| self.default_data_dir.join(project_id).join("mirror"));
         if !mirror_dir.exists() {
             return Ok(0);
         }

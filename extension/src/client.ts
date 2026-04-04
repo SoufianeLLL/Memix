@@ -506,6 +506,28 @@ export class MemoryClient {
 		});
 	}
 
+	static async getBrainDbSize(projectId: string): Promise<{ size_bytes: number }> {
+		return new Promise((resolve, reject) => {
+			const requestPath = `${API_PREFIX}/brain/size/${encodeURIComponent(projectId)}`;
+			const options = getRequestOptions('GET', requestPath);
+			const req = http.request(options, (res) => {
+				if (res.statusCode !== 200) {
+					buildDaemonError(res, requestPath).then(reject, reject);
+					return;
+				}
+				readResponseBody(res).then((data) => {
+					try {
+						resolve(JSON.parse(data || '{}'));
+					} catch (e) {
+						reject(e);
+					}
+				}, reject);
+			});
+			req.on('error', reject);
+			req.end();
+		});
+	}
+
 	static async getRedisStats(): Promise<RedisStats> {
 		return new Promise((resolve, reject) => {
 			const requestPath = `${API_PREFIX}/redis/stats`;

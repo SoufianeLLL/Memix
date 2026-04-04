@@ -28,7 +28,7 @@ pub struct BackgroundIndexer {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     embedding_store: EmbeddingStore,
     token_tracker: Arc<TokenTracker>,
-    db_path: PathBuf,
+    data_dir: PathBuf,
 }
 
 impl BackgroundIndexer {
@@ -38,9 +38,9 @@ impl BackgroundIndexer {
         storage: Arc<dyn StorageBackend + Send + Sync>,
         embedding_store: EmbeddingStore,
         token_tracker: Arc<TokenTracker>,
-        db_path: PathBuf,
+        data_dir: PathBuf,
     ) -> Self {
-        Self { workspace_root, project_id, storage, embedding_store, token_tracker, db_path }
+        Self { workspace_root, project_id, storage, embedding_store, token_tracker, data_dir }
     }
 
     pub async fn run_if_needed(&self) {
@@ -129,7 +129,9 @@ impl BackgroundIndexer {
             self.token_tracker.session.embedding_cache_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
             // Open SQLite pool for this project and upsert embedding
-            let db_url = format!("sqlite:{}", self.db_path.display());
+            // Database path: {data_dir}/{project_id}/brain.db
+            let db_path = self.data_dir.join(&self.project_id).join("brain.db");
+            let db_url = format!("sqlite:{}", db_path.display());
             if let Ok(pool) = SqlitePool::connect(&db_url).await {
                 let _ = self.embedding_store.upsert(&entry_id, embedding, content_hash, &pool).await;
             }

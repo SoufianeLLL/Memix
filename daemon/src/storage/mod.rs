@@ -34,6 +34,9 @@ pub mod hybrid;
 
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
+    /// Returns self as Any for downcasting to concrete types
+    fn as_any(&self) -> &dyn std::any::Any;
+    
     async fn get_entries(&self, project_id: &str) -> Result<Vec<MemoryEntry>>;
     async fn get_entry(&self, project_id: &str, entry_id: &str) -> Result<MemoryEntry>;
     async fn upsert_entry(&self, project_id: &str, entry: MemoryEntry) -> Result<()>;

@@ -596,6 +596,10 @@ impl RedisStorage {
 
 #[async_trait]
 impl StorageBackend for RedisStorage {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    
 	async fn embed_text(&self, text: &str) -> Vec<f32> {
         // Calls your internal `embed_text` which uses `self.embedding_cache`
         RedisStorage::embed_text(self, text).await

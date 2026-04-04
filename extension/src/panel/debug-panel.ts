@@ -628,10 +628,10 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 			const activeFile = vscode.window.activeTextEditor?.document?.uri?.fsPath || '';
 
 			// Parallelize independent API calls
-			const [allData, skeletonStats, redisStats] = await Promise.all([
+			const [allData, skeletonStats, brainDbSize] = await Promise.all([
 				this.brain.getAll(),
 				projectId ? MemoryClient.getSkeletonStats(projectId) : Promise.resolve(null),
-				MemoryClient.getRedisStats().catch(() => null)
+				projectId ? MemoryClient.getBrainDbSize(projectId).catch(() => ({ size_bytes: 0 })) : Promise.resolve({ size_bytes: 0 })
 			]);
 
 			const keys: Record<string, number> = {};
@@ -668,30 +668,9 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 			const missingRequiredKeys = requiredKeys.filter(k => !(k in sizeInfo.keys));
 			const isInitialized = missingRequiredKeys.length === 0;
 
-			let redisUsedBytes = sizeInfo.totalBytes;
-			let redisMaxBytes = sizeInfo.totalBytes * 2;
-			let redisMaxEstimated = false;
-			const redisMaxOverrideMb = vscode.workspace.getConfiguration().get<number>('memix.redis.maxMemoryMbOverride') || 0;
-			if (redisMaxOverrideMb > 0) {
-				redisMaxBytes = redisMaxOverrideMb * 1024 * 1024;
-				redisMaxEstimated = false;
-			}
-			if (redisStats) {
-				if (typeof redisStats.used_bytes === 'number') {
-					redisUsedBytes = redisStats.used_bytes;
-				}
-				if (redisMaxOverrideMb > 0) {
-					// override is authoritative
-				} else if (typeof redisStats.max_bytes === 'number' && redisStats.max_bytes > 0) {
-					redisMaxBytes = redisStats.max_bytes;
-				} else if (typeof redisStats.used_bytes === 'number' && redisStats.used_bytes > 0) {
-					redisMaxBytes = 30 * 1024 * 1024;
-					redisMaxEstimated = true;
-				}
-			}
-			if (!redisMaxBytes || redisMaxBytes <= 0) {
-				redisMaxBytes = 1;
-			}
+			let brainDbUsedBytes = brainDbSize?.size_bytes || 0;
+			let brainDbMaxBytes = 100 * 1024 * 1024; // 100MB default max for SQLite brain
+			let brainDbMaxEstimated = true;
 
 			const canonicalKeyList = Object.keys(BRAIN_KEY_SPECS);
 			// Filter out warning_signature files from key coverage display
@@ -942,9 +921,9 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 					workspaceRoot: this.workspaceRoot ?? '',
 					advancedDataLoaded: includeAdvanced,
 					totalSizeBytes: sizeInfo.totalBytes,
-					redisUsedBytes,
-					redisMaxBytes,
-					redisMaxEstimated,
+					brainDbUsedBytes,
+					brainDbMaxBytes,
+					brainDbMaxEstimated,
 					keys: sizeInfo.keys,
 					receivedKeys: Object.keys(sizeInfo.keys),
 					categories,
@@ -1141,11 +1120,10 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 					<span>Memix Size</span>
 					<span id="size" class="stat-value">\u2014</span>
 				</div>
-				<div class="stat" style="margin-top: 4px">
-					<span>Redis Dataset <button id="redis-max-edit" class="icon-btn" title="Set Redis max memory override">✎</button></span>
-					<span id="redis-size-text" class="stat-value">\u2014</span>
+				<div class="stat">
+					<span>Brain Database</span>
+					<span id="brain-db-size-text" class="stat-value">\u2014</span>
 				</div>
-				<div class="bar mb-2 mt-2"><div id="redis-size-bar" class="bar-fill" style="width:0%;background:#4ec9b0"></div></div>
 				<div class="stat">
 					<span>Keys</span>
 					<span id="keyCount" class="stat-value">\u2014</span>

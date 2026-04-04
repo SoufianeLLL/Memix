@@ -432,6 +432,7 @@ pub fn build_router(
 		.route("/api/v1/license/status", get(get_license_status))
 		.route("/api/v1/redis/ping", post(redis_ping))
 		.route("/api/v1/redis/stats", get(redis_stats))
+		.route("/api/v1/brain/size/:project_id", get(brain_size))
 		
 		// Workspace Registry (multi-tenant)
 		.route("/api/v1/workspace/register", post(register_workspace))
@@ -694,6 +695,20 @@ async fn redis_stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 	}
 }
 
+async fn brain_size(
+	State(state): State<Arc<AppState>>,
+	Path(project_id): Path<String>,
+) -> impl IntoResponse {
+	// Downcast to HybridStorage to access brain_db_size
+	if let Some(hybrid) = state.storage.as_any().downcast_ref::<crate::storage::hybrid::HybridStorage>() {
+		let size_bytes = hybrid.brain_db_size(&project_id).await;
+		let response = serde_json::json!({ "size_bytes": size_bytes });
+		(StatusCode::OK, Json(response)).into_response()
+	} else {
+		(StatusCode::INTERNAL_SERVER_ERROR, "Storage backend not supported").into_response()
+	}
+}
+
 /// Simple health check for the VS Code extension to poll on boot
 /// Returns workspace_root and project_id so the extension can detect
 /// when a different project is opened and restart the daemon accordingly.
@@ -759,6 +774,14 @@ async fn register_workspace(
         req.workspace_root,
         is_new
     );
+    
+    // Set workspace root for SQLite storage (stores brain at {workspace}/.memix/brain.db)
+    if is_new {
+        // Downcast to HybridStorage to access SQLite-specific methods
+        if let Some(hybrid) = state.storage.as_any().downcast_ref::<crate::storage::hybrid::HybridStorage>() {
+            hybrid.as_sqlite().set_workspace_root(&req.project_id, PathBuf::from(&req.workspace_root)).await;
+        }
+    }
     
     // Spawn an indexer for this workspace
     if is_new {
@@ -1472,7 +1495,7 @@ async fn purge_project(
 async fn daemon_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "status": "healthy",
-        "version": "0.10.0-beta",
+        "version": "0.11.0-beta",
         "workspace_root": state.workspace_root,
         "project_id": state.active_project_id,
         "features": [

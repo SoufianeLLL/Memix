@@ -693,10 +693,17 @@ async fn main() -> anyhow::Result<()> {
 	// state from SQLite after the socket is already bound and serving
 	// health checks. This is the only way to guarantee the socket binds within
 	// the extension's 5-second health check window.
-	let db_path = data_dir.join("brain.db");
+	//
+	// IMPORTANT: Use workspace_root from app_config so brain is stored IN the project
+	// at {workspace_root}/.memix/brain.db, not in global data_dir
+	let workspace_root_for_embedding = app_config
+		.workspace_root
+		.clone()
+		.map(std::path::PathBuf::from)
+		.unwrap_or_else(|| data_dir.join(&project_id_for_events));
 	let embedding_store = crate::observer::embedding_store::EmbeddingStore::empty(
 		&project_id_for_events,
-		&db_path,
+		&workspace_root_for_embedding,
 	);
 
 	// Initialize multi-tenant workspace registry
@@ -718,7 +725,7 @@ async fn main() -> anyhow::Result<()> {
 			storage_backend.clone(),
 			embedding_store.clone(),
 			initial_tracker.clone(),
-			db_path.clone(),
+			data_dir.clone(), // indexer_manager still uses data_dir for fallback
 		)
 	));
 
@@ -940,13 +947,13 @@ async fn main() -> anyhow::Result<()> {
 	// runs when binary file is absent — new machine or first run.
 	{
 		let embedding_store_for_load = embedding_store.clone();
-		let db_path_for_emb = db_path.clone();
+		let workspace_root_for_emb = workspace_root_for_embedding.clone();
 		let project_id_for_emb = project_id_for_events.clone();
 		let startup_ready_embeddings = startup_ready.clone();
 		tokio::spawn(async move {
 			startup_ready_embeddings.notified().await;
-			// Load embeddings from SQLite
-			match crate::observer::embedding_store::EmbeddingStore::load(&project_id_for_emb, &db_path_for_emb).await {
+			// Load embeddings from SQLite (stored at {workspace_root}/.memix/brain.db)
+			match crate::observer::embedding_store::EmbeddingStore::load(&project_id_for_emb, &workspace_root_for_emb).await {
 				Ok(loaded_store) => {
 					// Copy loaded data into the existing store
 					embedding_store_for_load.copy_from(&loaded_store).await;

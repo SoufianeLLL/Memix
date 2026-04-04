@@ -44,16 +44,23 @@ struct EmbeddingStoreInner {
     id_by_position: RwLock<Vec<String>>,
     /// Content hashes for cache invalidation (persisted across restarts)
     content_hashes: RwLock<HashMap<String, u64>>,
-    /// Path to the SQLite database
-    db_path: PathBuf,
+    /// Workspace root directory (database at {workspace_root}/.memix/brain.db)
+    workspace_root: PathBuf,
     /// Project ID for this store
     project_id: String,
 }
 
+/// Get database path for embeddings: {workspace_root}/.memix/brain.db
+fn get_embedding_db_path(workspace_root: &Path) -> PathBuf {
+    workspace_root.join(".memix").join("brain.db")
+}
+
 impl EmbeddingStore {
-    /// Load from SQLite database. This is the startup path — call once per daemon session.
-    pub async fn load(project_id: &str, db_path: &Path) -> Result<Self> {
-        let store = Self::empty(project_id, db_path);
+    /// Load from SQLite database (per-project). This is the startup path — call once per daemon session.
+    /// The database is stored at {workspace_root}/.memix/brain.db
+    pub async fn load(project_id: &str, workspace_root: &Path) -> Result<Self> {
+        let db_path = get_embedding_db_path(workspace_root);
+        let store = Self::empty(project_id, workspace_root);
         
         // Open a read-only connection for the initial load
         let db_url = format!("sqlite:{}?mode=ro", db_path.display());
@@ -101,14 +108,16 @@ impl EmbeddingStore {
         Ok(store)
     }
 
-    pub fn empty(project_id: &str, db_path: &Path) -> Self {
+    /// Create an empty embedding store for a project.
+    /// The database will be stored at {workspace_root}/.memix/brain.db
+    pub fn empty(project_id: &str, workspace_root: &Path) -> Self {
         Self {
             inner: Arc::new(EmbeddingStoreInner {
                 index: RwLock::new(HashMap::new()),
                 matrix: RwLock::new(Vec::new()),
                 id_by_position: RwLock::new(Vec::new()),
                 content_hashes: RwLock::new(HashMap::new()),
-                db_path: db_path.to_path_buf(),
+                workspace_root: workspace_root.to_path_buf(),
                 project_id: project_id.to_string(),
             }),
         }
@@ -120,14 +129,12 @@ impl EmbeddingStore {
         data_dir: &Path,
         _redis_client: Option<&redis::Client>,
     ) -> Result<Self> {
-        let db_path = data_dir.join("brain.db");
-        Self::load(project_id, &db_path).await
+        Self::load(project_id, data_dir).await
     }
 
     /// Legacy compatibility: empty store with data_dir
     pub fn empty_legacy(data_dir: &Path, project_id: &str) -> Self {
-        let db_path = data_dir.join("brain.db");
-        Self::empty(project_id, &db_path)
+        Self::empty(project_id, data_dir)
     }
 
     /// Get the content hash for an entry (for cache invalidation)

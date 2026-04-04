@@ -57,6 +57,21 @@ impl HybridStorage {
         })
     }
     
+    /// Get reference to SQLite storage (for workspace root management)
+    pub fn as_sqlite(&self) -> &SqliteStorage {
+        &self.sqlite
+    }
+    
+    /// Get brain database file size for a project
+    pub async fn brain_db_size(&self, project_id: &str) -> u64 {
+        self.sqlite.get_brain_db_size(project_id).await
+    }
+    
+    /// Returns self as Any for downcasting
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    
     /// Enable or disable Redis sync (can be toggled at runtime)
     pub async fn set_redis_enabled(&self, enabled: bool) {
         let mut flag = self.redis_enabled.write().await;
@@ -142,6 +157,10 @@ impl HybridStorage {
 
 #[async_trait]
 impl StorageBackend for HybridStorage {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    
     async fn get_entries(&self, project_id: &str) -> Result<Vec<MemoryEntry>> {
         // Always read from SQLite (fast local)
         self.sqlite.get_entries(project_id).await

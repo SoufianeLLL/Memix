@@ -774,17 +774,26 @@ window.addEventListener('message', function (e) {
 		var sizeEl = byId('size');
 		if (sizeEl) sizeEl.textContent = sizeKB + ' KB';
 
-		var usedMB = (data.redisUsedBytes / (1024 * 1024)).toFixed(1);
-		var maxMB = (data.redisMaxBytes / (1024 * 1024)).toFixed(1);
-		var pct = Math.min((data.redisUsedBytes / data.redisMaxBytes) * 100, 100);
+		// Helper to format bytes to human readable (KB, MB, GB)
+		function formatBytes(bytes) {
+			if (bytes === 0) return '0 B';
+			var k = 1024;
+			var sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+			var i = Math.floor(Math.log(bytes) / Math.log(k));
+			return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+		}
+
+		var usedFormatted = formatBytes(data.brainDbUsedBytes);
+		var maxFormatted = formatBytes(data.brainDbMaxBytes);
+		var pct = Math.min((data.brainDbUsedBytes / data.brainDbMaxBytes) * 100, 100);
 		
-		var suffix = data.redisMaxEstimated ? ' (est.)' : '';
-		var rsText = byId('redis-size-text');
-		if (rsText) rsText.textContent = pct.toFixed(1) + '% (' + usedMB + ' MB / ' + maxMB + ' MB)' + suffix;
-		var rsBar = byId('redis-size-bar');
-		if (rsBar) {
-			rsBar.style.width = pct + '%';
-			rsBar.style.background = pct > 90 ? '#f44747' : pct > 75 ? '#cca700' : '#4ec9b0';
+		var suffix = data.brainDbMaxEstimated ? ' (est.)' : '';
+		var dbText = byId('brain-db-size-text');
+		if (dbText) dbText.textContent = pct.toFixed(1) + '% (' + usedFormatted + ' / ' + maxFormatted + ')' + suffix;
+		var dbBar = byId('brain-db-size-bar');
+		if (dbBar) {
+			dbBar.style.width = pct + '%';
+			dbBar.style.background = pct > 90 ? '#f44747' : pct > 75 ? '#cca700' : '#4ec9b0';
 		}
 
 		var keyCountEl = byId('keyCount');
