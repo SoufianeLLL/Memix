@@ -6,7 +6,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ---
 
-## [1.8.1] (Daemon: 0.11.1-beta) — 2026-04-04
+## [1.8.1] (Daemon: 0.11.0-beta) — 2026-04-04
 ### Fixed
 - **Removed 'Connect to Redis first' barrier:** Init command no longer requires Redis URL since SQLite is the primary storage.
   - `generateRules` now works with empty Redis URL (optional Redis, required SQLite).
