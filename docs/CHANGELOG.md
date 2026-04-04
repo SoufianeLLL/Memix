@@ -6,6 +6,28 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ---
 
+## [1.7.0] (Daemon: 0.10.0-beta) — 2026-04-04
+### Added
+- **SQLite Primary Storage:** Replaced Redis as primary storage with SQLite for 50-200× faster local reads.
+  - Zero network dependency for solo use - works completely offline.
+  - ACID transactions - crash-safe writes with atomic multi-entry updates.
+  - WAL mode for concurrent reads while writing.
+  - Single `.memix/brain.db` file per project - easy backup and git-ignore.
+  - Full SQL query capability with indexed queries instead of load-everything-and-filter.
+  - `embedding_metadata` table tracks which files have embeddings.
+
+### Changed
+- **HybridStorage Architecture:** SQLite is now the primary fast local store. Redis is optional and only used for:
+  - Team Sync (when `team_redis_url` is configured)
+  - Cross-machine sync (opt-in feature)
+- **Schema:** New tables `brain_entries`, `skeleton_entries`, `embedding_metadata` with composite primary keys `(project_id, id)`.
+
+### Fixed
+- **Panel Refresh Spam:** Added debouncing (150ms) and guard flag to prevent multiple concurrent "Refreshing panel..." notifications when switching windows rapidly.
+- **Silent Background Refresh:** Window focus triggers silent panel refresh without progress notification.
+
+---
+
 ## [1.6.0] (Daemon: 0.9.0-beta) — 2026-04-03
 ### Added
 - **Per-Workspace Token Intelligence:** Token stats (Sessions, Context Compiled, Tokens Saved, Files Indexed, Cache Efficiency, Compression Ratio) are now tracked independently for each workspace instead of being shared globally.

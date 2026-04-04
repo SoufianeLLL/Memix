@@ -29,6 +29,8 @@ pub struct TeamSyncReport {
 }
 
 pub mod redis;
+pub mod sqlite;
+pub mod hybrid;
 
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
@@ -106,8 +108,10 @@ pub trait StorageBackend: Send + Sync {
 }
 
 /// Factory function deciding which backend to boot based on config.
+/// Now uses HybridStorage (SQLite + optional Redis) for best performance.
 pub async fn initialize_storage(
     config: &AppConfig,
 ) -> Result<Arc<dyn StorageBackend + Send + Sync>> {
-    Ok(Arc::new(redis::RedisStorage::new(config).await?))
+    // Use HybridStorage: SQLite for speed, Redis for optional sync
+    Ok(Arc::new(hybrid::HybridStorage::new(config).await?))
 }

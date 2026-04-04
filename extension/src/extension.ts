@@ -230,31 +230,50 @@ export async function activate(context: vscode.ExtensionContext) {
 	}
 	
 	// --- Handle window focus changes (activate workspace) ---
+	let isRefreshing = false; // Guard against multiple concurrent refreshes
+	let refreshDebounceTimer: NodeJS.Timeout | null = null;
+	
 	context.subscriptions.push(
 		vscode.window.onDidChangeWindowState(async (windowState) => {
 			if (windowState.focused && projectId && daemonReadinessState.kind === 'ready') {
-				try {
-					// Re-derive projectId from current workspace (may be different if multi-root)
-					const currentWorkspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-					const currentProjectId = currentWorkspaceRoot 
-						? (vscode.workspace.getConfiguration('memix').get<string>('projectId') || hashProjectId(currentWorkspaceRoot))
-						: projectId;
-					
-					// Update BrainManager if projectId changed
-					if (brain && currentProjectId !== brain.getProjectId()) {
-						brain.setProjectId(currentProjectId);
-						panelProvider.setBrain(brain);
-						console.log(`Memix: Switched to workspace ${currentProjectId}`);
-					}
-					
-					// Activate workspace in daemon
-					await MemoryClient.activateWorkspace(currentProjectId);
-					
-					// Refresh panel with new workspace data
-					await vscode.commands.executeCommand('memix.refreshPanel');
-				} catch (e) {
-					// Ignore - daemon may be busy
+				// Debounce: wait 150ms before acting, clear any pending
+				if (refreshDebounceTimer) {
+					clearTimeout(refreshDebounceTimer);
 				}
+				refreshDebounceTimer = setTimeout(async () => {
+					// Guard: skip if already refreshing
+					if (isRefreshing) {
+						console.log('Memix: Skipping refresh - already in progress');
+						return;
+					}
+					isRefreshing = true;
+					
+					try {
+						// Re-derive projectId from current workspace (may be different if multi-root)
+						const currentWorkspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+						const currentProjectId = currentWorkspaceRoot 
+							? (vscode.workspace.getConfiguration('memix').get<string>('projectId') || hashProjectId(currentWorkspaceRoot))
+							: projectId;
+						
+						// Update BrainManager if projectId changed
+						if (brain && currentProjectId !== brain.getProjectId()) {
+							brain.setProjectId(currentProjectId);
+							panelProvider.setBrain(brain);
+							console.log(`Memix: Switched to workspace ${currentProjectId}`);
+						}
+						
+						// Activate workspace in daemon
+						await MemoryClient.activateWorkspace(currentProjectId);
+						
+						// Refresh panel with new workspace data (silent, no progress notification)
+						panelProvider?.getWebView()?.postMessage({ command: 'showLoading', text: 'Refreshing data...' });
+						await panelProvider?.sendUpdate();
+					} catch (e) {
+						// Ignore - daemon may be busy
+					} finally {
+						isRefreshing = false;
+					}
+				}, 150);
 			}
 		})
 	);
@@ -381,11 +400,9 @@ export async function activate(context: vscode.ExtensionContext) {
 			];
 
 			const isConnected = await secretManager.getSecret('redisUrl');
-			const isInitialized = isConnected ? await brain.exists() : false;
+			const isInitialized = await brain.exists();
 
-			if (!isConnected) {
-				options.push({ label: '$(database) Connect Redis...', description: 'Link to external brain storage' });
-			} else if (!isInitialized) {
+			if (!isInitialized) {
 				options.push({ label: '$(zap) Initialize Brain', description: 'Create foundational memories' });
 			}
 
@@ -394,33 +411,35 @@ export async function activate(context: vscode.ExtensionContext) {
 				{ label: '$(export) Export Brain', description: 'Backup memories' },
 				{ label: '$(root-folder) Import Brain...', description: 'Restore memories' },
 				{ label: '$(cloud-upload) Export Brain Mirror', description: 'Force daemon JSON mirror sync (.memix/brain)' },
-				{ label: '$(cloud-download) Import Brain Mirror', description: 'Rehydrate Redis from .memix/brain/*.json' },
-				{ label: '$(tools) Run Brain Migrations', description: 'Backfill vectors + update schema marker' },
-				// { label: '$(organization) Team Sync...', description: 'Sync offline CRDTs' },
+				{ label: '$(cloud-download) Import Brain Mirror', description: 'Rehydrate from .memix/brain/*.json' },
 				{ label: '', kind: vscode.QuickPickItemKind.Separator },
 				{ label: '$(trash) Prune Stale Data', description: 'Clear excessive logs' },
 				{ label: '$(wrench) Recover Corruption', description: 'Fix broken structures' },
+				{ label: '$(trashcan) Clear Brain Database', description: 'Delete all entries from SQLite' },
 				{ label: '', kind: vscode.QuickPickItemKind.Separator },
-				{ label: '$(database) Change Redis Connection...', description: 'Update external brain storage URL' },
-				{ label: '$(trashcan) Clear Brain', description: 'Delete all states' }
+				{ label: '$(organization) Enable Team Sync...', description: 'Connect Redis for cross-machine sync' }
 			);
+			
+			// Show disconnect option if Redis is connected
+			if (isConnected) {
+				options.push({ label: '$(debug-disconnect) Disable Team Sync', description: 'Remove Redis connection' });
+			}
+			
 			const picked = await vscode.window.showQuickPick(options, { placeHolder: 'Memix Brain Actions' });
 			if (!picked) { return; }
 			const cmds: Record<string, string> = {
 				'$(pulse) Health Check': 'memix.healthCheck',
 				'$(git-merge) Detect Conflicts': 'memix.detectConflicts',
-				'$(database) Connect Redis...': 'memix.connect',
 				'$(zap) Initialize Brain': 'memix.init',
 				'$(export) Export Brain': 'memix.exportBrain',
 				'$(root-folder) Import Brain...': 'memix.importBrain',
 				'$(cloud-upload) Export Brain Mirror': 'memix.exportBrainMirror',
 				'$(cloud-download) Import Brain Mirror': 'memix.importBrainMirror',
-				'$(tools) Run Brain Migrations': 'memix.migrateBrain',
-				// '$(organization) Team Sync...': 'memix.teamSync',
 				'$(trash) Prune Stale Data': 'memix.prune',
 				'$(wrench) Recover Corruption': 'memix.recoverBrain',
-				'$(database) Change Redis Connection...': 'memix.connect',
-				'$(trashcan) Clear Brain': 'memix.clearBrain'
+				'$(trashcan) Clear Brain Database': 'memix.clearBrainDatabase',
+				'$(organization) Enable Team Sync...': 'memix.connect',
+				'$(debug-disconnect) Disable Team Sync': 'memix.disconnect'
 			};
 			const cmd = cmds[picked.label];
 			if (cmd) {
@@ -662,7 +681,28 @@ export async function activate(context: vscode.ExtensionContext) {
 		})
 	);
 
-	// Clear Brain
+	// Clear Brain Database (SQLite)
+	context.subscriptions.push(
+		vscode.commands.registerCommand('memix.clearBrainDatabase', async () => {
+			if (!(await ensureDaemonReady())) { return; }
+			if (!requireWorkspace()) { return; }
+			const confirm = await vscode.window.showWarningMessage(
+				'Clear entire brain database? This will delete all entries from SQLite and cannot be undone.',
+				'Yes, clear database',
+				'Cancel'
+			);
+			if (confirm !== 'Yes, clear database') { return; }
+			try {
+				await MemoryClient.purgeProject(brain.getProjectId());
+				vscode.window.showInformationMessage('Memix: Brain database cleared.');
+				panelProvider?.sendUpdate();
+			} catch (err: any) {
+				vscode.window.showErrorMessage(`Memix clear database failed: ${err.message}`);
+			}
+		})
+	);
+
+	// Clear Brain (Legacy - Redis)
 	context.subscriptions.push(
 		vscode.commands.registerCommand('memix.clearBrain', async () => {
 			if (!(await ensureDaemonReady())) { return; }

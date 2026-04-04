@@ -171,6 +171,16 @@ impl ObserverManager {
         self.processors.get_mut(project_id)
     }
     
+    /// Get cloned references to a processor's Code DNA and Git Insights (for read-only access)
+    pub fn get_processor_insights(&self, project_id: &str) -> Option<(
+        Arc<tokio::sync::Mutex<ProjectCodeDna>>,
+        Arc<tokio::sync::Mutex<ProjectGitInsights>>,
+    )> {
+        self.processors.get(project_id).map(|p| {
+            (p.code_dna.clone(), p.git_insights.clone())
+        })
+    }
+    
     /// Check if a watcher is running for a project
     pub fn is_running(&self, project_id: &str) -> bool {
         self.watchers.get(project_id)

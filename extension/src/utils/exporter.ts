@@ -6,7 +6,7 @@ export async function exportBrain(brain: BrainManager, workspaceRoot: string): P
     const allData = await brain.getAll();
 
     const exportData = {
-        memix_version: '1.6.0',
+        memix_version: '1.7.0',
         exported_at: new Date().toISOString(),
         brain: allData
     };

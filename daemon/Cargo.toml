@@ -1,6 +1,6 @@
 [package]
 name = "memix-daemon"
-version = "0.9.0-beta"
+version = "0.10.0-beta"
 edition = "2021"
 authors = ["DigitalVize LLC"]
 description = "High-performance Memix backend daemon for persistent AI memory"
@@ -11,6 +11,7 @@ axum = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 redis = { version = "0.28", features = ["tokio-rustls-comp", "connection-manager"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "macros", "chrono"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"

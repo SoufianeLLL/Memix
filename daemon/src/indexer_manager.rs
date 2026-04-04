@@ -22,6 +22,8 @@ pub struct IndexerManager {
     embedding_store: EmbeddingStore,
     /// Shared token tracker
     token_tracker: Arc<TokenTracker>,
+    /// Path to SQLite database
+    db_path: PathBuf,
 }
 
 impl IndexerManager {
@@ -29,12 +31,14 @@ impl IndexerManager {
         storage: Arc<dyn StorageBackend + Send + Sync>,
         embedding_store: EmbeddingStore,
         token_tracker: Arc<TokenTracker>,
+        db_path: PathBuf,
     ) -> Self {
         Self {
             indexers: HashMap::new(),
             storage,
             embedding_store,
             token_tracker,
+            db_path,
         }
     }
 
@@ -58,6 +62,7 @@ impl IndexerManager {
         let token_tracker = self.token_tracker.clone();
         let pid = project_id.clone();
         let root = PathBuf::from(workspace_root);
+        let db_path = self.db_path.clone();
 
         let handle = tokio::spawn(async move {
             // Small delay to allow workspace registration to complete
@@ -69,6 +74,7 @@ impl IndexerManager {
                 storage,
                 embedding_store,
                 token_tracker,
+                db_path,
             );
             
             tracing::info!("IndexerManager: starting indexer for {}", pid);

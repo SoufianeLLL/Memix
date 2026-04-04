@@ -558,14 +558,32 @@ async fn get_observer_graph(State(state): State<Arc<AppState>>) -> impl IntoResp
 	(StatusCode::OK, Json(graph)).into_response()
 }
 
-async fn get_observer_dna(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-	let dna = state.code_dna.lock().await.clone();
-	(StatusCode::OK, Json(dna)).into_response()
+async fn get_observer_dna(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ProjectQuery>,
+) -> impl IntoResponse {
+    let project_id = query.project_id.unwrap_or_default();
+    let om = state.observer_manager.lock().await;
+    if let Some((code_dna, _)) = om.get_processor_insights(&project_id) {
+        let dna = code_dna.lock().await.clone();
+        (StatusCode::OK, Json(dna)).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, Json(ProjectCodeDna::default())).into_response()
+    }
 }
 
-async fn get_observer_dna_otel(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-	let dna = state.code_dna.lock().await.clone();
-	(StatusCode::OK, Json(dna.to_otel_export())).into_response()
+async fn get_observer_dna_otel(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ProjectQuery>,
+) -> impl IntoResponse {
+    let project_id = query.project_id.unwrap_or_default();
+    let om = state.observer_manager.lock().await;
+    if let Some((code_dna, _)) = om.get_processor_insights(&project_id) {
+        let dna = code_dna.lock().await.clone();
+        (StatusCode::OK, Json(dna.to_otel_export())).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, Json(ProjectCodeDna::default().to_otel_export())).into_response()
+    }
 }
 
 async fn get_observer_intent(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -575,14 +593,28 @@ async fn get_observer_intent(State(state): State<Arc<AppState>>) -> impl IntoRes
 	}))).into_response()
 }
 
-async fn get_observer_git(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-	let snapshot = state.git_insights.lock().await.clone();
-	(StatusCode::OK, Json(snapshot)).into_response()
+async fn get_observer_git(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ProjectQuery>,
+) -> impl IntoResponse {
+    let project_id = query.project_id.unwrap_or_default();
+    let om = state.observer_manager.lock().await;
+    if let Some((_, git_insights)) = om.get_processor_insights(&project_id) {
+        let snapshot = git_insights.lock().await.clone();
+        (StatusCode::OK, Json(snapshot)).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, Json(ProjectGitInsights::default())).into_response()
+    }
 }
 
 #[derive(Deserialize)]
 struct CausalChainQuery {
 	file: String,
+}
+
+#[derive(Deserialize, Default)]
+struct ProjectQuery {
+    project_id: Option<String>,
 }
 
 async fn get_causal_chain(
@@ -1440,7 +1472,7 @@ async fn purge_project(
 async fn daemon_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "status": "healthy",
-        "version": "0.9.0-beta",
+        "version": "0.10.0-beta",
         "workspace_root": state.workspace_root,
         "project_id": state.active_project_id,
         "features": [

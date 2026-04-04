@@ -18,6 +18,7 @@ use crate::observer::parser::AstParser;
 use crate::observer::skeleton::FileSkeleton;
 use crate::storage::StorageBackend;
 use crate::token::tracker::TokenTracker;
+use sqlx::SqlitePool;
 
 const DEFAULT_RATE_LIMIT_FILES_PER_SEC: u64 = 10;
 
@@ -27,6 +28,7 @@ pub struct BackgroundIndexer {
     storage: Arc<dyn StorageBackend + Send + Sync>,
     embedding_store: EmbeddingStore,
     token_tracker: Arc<TokenTracker>,
+    db_path: PathBuf,
 }
 
 impl BackgroundIndexer {
@@ -36,8 +38,9 @@ impl BackgroundIndexer {
         storage: Arc<dyn StorageBackend + Send + Sync>,
         embedding_store: EmbeddingStore,
         token_tracker: Arc<TokenTracker>,
+        db_path: PathBuf,
     ) -> Self {
-        Self { workspace_root, project_id, storage, embedding_store, token_tracker }
+        Self { workspace_root, project_id, storage, embedding_store, token_tracker, db_path }
     }
 
     pub async fn run_if_needed(&self) {
@@ -103,17 +106,34 @@ impl BackgroundIndexer {
             let entry_id = fsi_entry.id.clone();
             let content_for_embedding = fsi_entry.content.clone();
 
-            // Persist FSI to Redis
+            // Persist FSI to SQLite
             let _ = self.storage.upsert_skeleton_entry(&self.project_id, fsi_entry).await;
 
             // Layer 3: compute embedding for this skeleton entry
-            // Use the trait method which utilizes the RedisStorage embedding_cache
+            // Use the trait method which utilizes the embedding_cache
             let embedding = self.storage.embed_text(&content_for_embedding).await;
 
-            // Track the cache miss (background indexing is inherently calculating missing embeddings)
+            // Compute content hash for cache invalidation
+            let content_hash = EmbeddingStore::hash_content(&content_for_embedding);
+            
+            // Check if we already have this embedding with matching hash
+            if let Some(existing_hash) = self.embedding_store.get_content_hash(&entry_id).await {
+                if existing_hash == content_hash {
+                    // Cache hit - skip recomputation
+                    self.token_tracker.session.embedding_cache_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    continue;
+                }
+            }
+
+            // Cache miss - compute and store
             self.token_tracker.session.embedding_cache_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-            self.embedding_store.upsert(&entry_id, embedding).await;
+            // Open SQLite pool for this project and upsert embedding
+            let db_url = format!("sqlite:{}", self.db_path.display());
+            if let Ok(pool) = SqlitePool::connect(&db_url).await {
+                let _ = self.embedding_store.upsert(&entry_id, embedding, content_hash, &pool).await;
+            }
+            
             self.token_tracker.session.files_skeleton_indexed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
             indexed_count += 1;
@@ -128,9 +148,7 @@ impl BackgroundIndexer {
             self.embedding_store.len().await
         );
 
-        // Flush to disk + Redis after the full scan
-        let redis_client = None; // Pass actual client from AppState in real integration
-        let _ = self.embedding_store.flush(redis_client).await;
+        // SQLite writes are immediate - no flush needed
     }
 }
 

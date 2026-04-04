@@ -690,12 +690,13 @@ async fn main() -> anyhow::Result<()> {
 	// ── Start with empty EmbeddingStore and TokenTracker synchronously ──────────
 	// Both are initialized to empty/default here so build_router can proceed
 	// immediately with no Redis I/O. Background tasks below will load the real
-	// state from disk and Redis after the socket is already bound and serving
+	// state from SQLite after the socket is already bound and serving
 	// health checks. This is the only way to guarantee the socket binds within
-	// the extension's 5-second health check window when Redis is slow or throttled.
+	// the extension's 5-second health check window.
+	let db_path = data_dir.join("brain.db");
 	let embedding_store = crate::observer::embedding_store::EmbeddingStore::empty(
-		&data_dir,
 		&project_id_for_events,
+		&db_path,
 	);
 
 	// Initialize multi-tenant workspace registry
@@ -717,6 +718,7 @@ async fn main() -> anyhow::Result<()> {
 			storage_backend.clone(),
 			embedding_store.clone(),
 			initial_tracker.clone(),
+			db_path.clone(),
 		)
 	));
 
@@ -938,21 +940,21 @@ async fn main() -> anyhow::Result<()> {
 	// runs when binary file is absent — new machine or first run.
 	{
 		let embedding_store_for_load = embedding_store.clone();
-		let data_dir_for_emb = data_dir.clone();
+		let db_path_for_emb = db_path.clone();
 		let project_id_for_emb = project_id_for_events.clone();
 		let startup_ready_embeddings = startup_ready.clone();
 		tokio::spawn(async move {
 			startup_ready_embeddings.notified().await;
-			if let Err(e) = tokio::time::timeout(
-				std::time::Duration::from_secs(5),
-				crate::observer::embedding_store::EmbeddingStore::load_into(
-					&embedding_store_for_load,
-					&project_id_for_emb,
-					&data_dir_for_emb,
-					None,
-				),
-			).await {
-				tracing::warn!("EmbeddingStore deferred load timed out — background indexer will rebuild");
+			// Load embeddings from SQLite
+			match crate::observer::embedding_store::EmbeddingStore::load(&project_id_for_emb, &db_path_for_emb).await {
+				Ok(loaded_store) => {
+					// Copy loaded data into the existing store
+					embedding_store_for_load.copy_from(&loaded_store).await;
+					tracing::info!("EmbeddingStore: loaded {} vectors from SQLite", loaded_store.len().await);
+				}
+				Err(e) => {
+					tracing::warn!("EmbeddingStore load failed: {} — background indexer will rebuild", e);
+				}
 			}
 		});
 	}
@@ -1025,8 +1027,6 @@ async fn main() -> anyhow::Result<()> {
 	let processor_predictor = predictor.clone();
 	let processor_call_graph = call_graph.clone();
 	let processor_agent_runtime = agent_runtime.clone();
-	let processor_code_dna = code_dna.clone();
-	let processor_git_insights = git_insights.clone();
 	let processor_config = daemon_config.clone();
 	let processor_observer_manager = observer_manager.clone();
 	
@@ -1098,8 +1098,6 @@ async fn main() -> anyhow::Result<()> {
 							&processor_predictor,
 							&processor_call_graph,
 							&processor_agent_runtime,
-							&processor_code_dna,
-							&processor_git_insights,
 							&config_snapshot,
 						).await;
 					}

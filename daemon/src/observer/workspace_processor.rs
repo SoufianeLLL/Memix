@@ -46,6 +46,12 @@ pub struct WorkspaceProcessor {
     /// Git archaeologist for this workspace (wrapped for Send+Sync)
     pub archaeologist: Arc<tokio::sync::Mutex<Option<GitArchaeologist>>>,
     
+    /// Per-workspace Code DNA (isolated per project)
+    pub code_dna: Arc<tokio::sync::Mutex<ProjectCodeDna>>,
+    
+    /// Per-workspace Git insights (isolated per project)
+    pub git_insights: Arc<tokio::sync::Mutex<ProjectGitInsights>>,
+    
     /// Last persist timestamps (throttling)
     pub last_observer_persist: std::time::Instant,
     pub last_fsi_persist: std::time::Instant,
@@ -98,6 +104,8 @@ impl WorkspaceProcessor {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("rules")
             ),
             archaeologist: Arc::new(tokio::sync::Mutex::new(archaeologist)),
+            code_dna: Arc::new(tokio::sync::Mutex::new(ProjectCodeDna::default())),
+            git_insights: Arc::new(tokio::sync::Mutex::new(ProjectGitInsights::default())),
             last_observer_persist: std::time::Instant::now(),
             last_fsi_persist: std::time::Instant::now(),
         }
@@ -172,8 +180,6 @@ impl WorkspaceProcessor {
         predictor: &Arc<ContextPredictor>,
         call_graph: &Arc<tokio::sync::Mutex<CallGraph>>,
         agent_runtime: &Arc<tokio::sync::Mutex<crate::agents::AgentRuntime>>,
-        code_dna: &Arc<tokio::sync::Mutex<ProjectCodeDna>>,
-        git_insights: &Arc<tokio::sync::Mutex<ProjectGitInsights>>,
         config: &crate::server::DaemonConfig,
     ) {
         if !path.is_file() {
@@ -362,7 +368,7 @@ impl WorkspaceProcessor {
         if self.last_observer_persist.elapsed() >= std::time::Duration::from_secs(2) {
             self.last_observer_persist = std::time::Instant::now();
             self.persist_observer_snapshots(
-                storage, autonomous, code_dna, git_insights, agent_runtime, &intent_entry_json
+                storage, autonomous, agent_runtime, &intent_entry_json
             ).await;
         }
     }
@@ -641,8 +647,6 @@ impl WorkspaceProcessor {
         &mut self,
         storage: &Arc<dyn StorageBackend + Send + Sync>,
         autonomous: &Arc<tokio::sync::Mutex<AutonomousPairProgrammer>>,
-        code_dna: &Arc<tokio::sync::Mutex<ProjectCodeDna>>,
-        git_insights: &Arc<tokio::sync::Mutex<ProjectGitInsights>>,
         agent_runtime: &Arc<tokio::sync::Mutex<crate::agents::AgentRuntime>>,
         intent_entry_json: &Option<String>,
     ) {
@@ -698,12 +702,12 @@ impl WorkspaceProcessor {
             (Some(graph_json), Some(changes_json), dna_json, dna_snapshot, git_json, git_snapshot, Some(file_map_json), Some(known_issues_json))
         };
         
-        // Update shared state
+        // Update per-workspace state
         if let Some(dna_snapshot) = dna_snapshot {
-            *code_dna.lock().await = dna_snapshot;
+            *self.code_dna.lock().await = dna_snapshot;
         }
         if let Some(git_snapshot) = git_snapshot {
-            *git_insights.lock().await = git_snapshot;
+            *self.git_insights.lock().await = git_snapshot;
         }
         
         // Persist to storage
