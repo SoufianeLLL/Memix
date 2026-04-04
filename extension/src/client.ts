@@ -1440,9 +1440,15 @@ export class MemoryClient {
 		});
 	}
 
-	static async controlStatus(): Promise<any> {
+	static async controlStatus(projectId?: string, workspaceRoot?: string): Promise<any> {
 		return new Promise((resolve, reject) => {
-			const requestPath = `${API_PREFIX}/control/status`;
+			let requestPath = `${API_PREFIX}/control/status`;
+			if (projectId) {
+				requestPath += `?project_id=${encodeURIComponent(projectId)}`;
+				if (workspaceRoot) {
+					requestPath += `&workspace_root=${encodeURIComponent(workspaceRoot)}`;
+				}
+			}
 			const req = http.request(getRequestOptions('GET', requestPath), (res) => {
 				readResponseBody(res).then((data) => {
 					if ((res.statusCode ?? 500) >= 400) {
@@ -1461,9 +1467,12 @@ export class MemoryClient {
 		});
 	}
 
-	static async controlResume(): Promise<void> {
+	static async controlResume(projectId?: string): Promise<void> {
 		return new Promise((resolve, reject) => {
-			const requestPath = `${API_PREFIX}/control/resume`;
+			let requestPath = `${API_PREFIX}/control/resume`;
+			if (projectId) {
+				requestPath += `?project_id=${encodeURIComponent(projectId)}`;
+			}
 			const req = http.request(getRequestOptions('POST', requestPath), (res) => {
 				readResponseBody(res).then((data) => {
 					if ((res.statusCode ?? 500) >= 400) {
@@ -1482,9 +1491,12 @@ export class MemoryClient {
 		});
 	}
 
-	static async controlPause(): Promise<void> {
+	static async controlPause(projectId?: string): Promise<void> {
 		return new Promise((resolve, reject) => {
-			const requestPath = `${API_PREFIX}/control/pause`;
+			let requestPath = `${API_PREFIX}/control/pause`;
+			if (projectId) {
+				requestPath += `?project_id=${encodeURIComponent(projectId)}`;
+			}
 			const req = http.request(getRequestOptions('POST', requestPath), (res) => {
 				readResponseBody(res).then((data) => {
 					if ((res.statusCode ?? 500) >= 400) {

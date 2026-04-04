@@ -26,15 +26,15 @@ export class DaemonManager {
     /**
      * Pings an already-running daemon (no spawn). Useful for dev external daemon mode.
      */
-    static async ping(): Promise<{ status: string, message?: string, workspace_root?: string, project_id?: string }> {
+    static async ping(projectId?: string, workspaceRoot?: string): Promise<{ status: string, message?: string, workspace_root?: string, project_id?: string }> {
         const httpUrl = process.env.MEMIX_DAEMON_HTTP_URL;
         if (httpUrl) {
-            return await this.pingHttp(httpUrl);
+            return await this.pingHttp(httpUrl, projectId, workspaceRoot);
         }
-        return await this.pingDaemon();
+        return await this.pingDaemon(projectId, workspaceRoot);
     }
 
-    private static pingHttp(baseUrl: string): Promise<{ status: string, message?: string, workspace_root?: string, project_id?: string }> {
+    private static pingHttp(baseUrl: string, projectId?: string, workspaceRoot?: string): Promise<{ status: string, message?: string, workspace_root?: string, project_id?: string }> {
         return new Promise((resolve, reject) => {
             let url: URL;
             try {
@@ -43,11 +43,19 @@ export class DaemonManager {
                 reject(e);
                 return;
             }
+            // CRITICAL: Pass project_id/workspace_root to prevent multi-window data mixing
+            let reqPath = url.pathname;
+            if (projectId) {
+                reqPath += `?project_id=${encodeURIComponent(projectId)}`;
+                if (workspaceRoot) {
+                    reqPath += `&workspace_root=${encodeURIComponent(workspaceRoot)}`;
+                }
+            }
             const req = http.request(
                 {
                     hostname: url.hostname,
                     port: url.port ? Number(url.port) : 80,
-                    path: url.pathname,
+                    path: reqPath,
                     method: 'GET'
                 },
                 (res) => {
@@ -215,12 +223,20 @@ export class DaemonManager {
         });
     }
 
-    private static pingDaemon(): Promise<{ status: string, message?: string, workspace_root?: string, project_id?: string }> {
+    private static pingDaemon(projectId?: string, workspaceRoot?: string): Promise<{ status: string, message?: string, workspace_root?: string, project_id?: string }> {
         return new Promise((resolve, reject) => {
+            // CRITICAL: Pass project_id/workspace_root to prevent multi-window data mixing
+            let reqPath = '/health';
+            if (projectId) {
+                reqPath += `?project_id=${encodeURIComponent(projectId)}`;
+                if (workspaceRoot) {
+                    reqPath += `&workspace_root=${encodeURIComponent(workspaceRoot)}`;
+                }
+            }
             const req = http.request(
                 {
                     socketPath: this.socketPath,
-                    path: '/health',
+                    path: reqPath,
                     method: 'GET'
                 },
                 (res) => {

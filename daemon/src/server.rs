@@ -712,24 +712,33 @@ async fn brain_size(
 /// Simple health check for the VS Code extension to poll on boot
 /// Returns workspace_root and project_id so the extension can detect
 /// when a different project is opened and restart the daemon accordingly.
-async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+async fn health_check(
+	State(state): State<Arc<AppState>>,
+	Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
 	let config = state.config.read().await.clone();
-	
-	// Get active workspace from registry (multi-tenant)
-	let registry = state.workspace_registry.lock().await;
-	let (workspace_root, project_id, brain_paused) = if let Some(active) = registry.get_active() {
-		let entry = registry.get(&active.project_id);
-		(
-			Some(active.workspace_root.clone()), 
-			Some(active.project_id.clone()),
-			entry.map(|e| e.brain_paused).unwrap_or(false)
-		)
+
+	// CRITICAL: Use project_id from request params, NOT from global active state
+	// This prevents data mixing when multiple IDE windows are open
+	let (workspace_root, project_id, brain_paused) = if let Some(pid) = params.get("project_id") {
+		// Get workspace info from registry for this specific project
+		let registry = state.workspace_registry.lock().await;
+		if let Some(entry) = registry.get(pid) {
+			(
+				Some(entry.workspace_root.clone()),
+				Some(pid.clone()),
+				entry.brain_paused
+			)
+		} else {
+			// Project not registered yet - use provided workspace_root or fallback
+			let ws = params.get("workspace_root").cloned();
+			(ws, Some(pid.clone()), false)
+		}
 	} else {
-		// Fall back to legacy single-workspace fields
+		// Fallback to legacy single-workspace fields (only when no project_id provided)
 		(state.workspace_root.clone(), state.active_project_id.clone(), config.brain_paused)
 	};
-	drop(registry);
-	
+
 	(StatusCode::OK, Json(serde_json::json!({
 		"status": "ok",
 		"message": "Memix daemon is running",
@@ -869,18 +878,20 @@ async fn list_workspaces(State(state): State<Arc<AppState>>) -> impl IntoRespons
     (StatusCode::OK, Json(snapshot))
 }
 
-async fn control_pause(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-	// Get active workspace and update per-workspace pause state
-	let mut registry = state.workspace_registry.lock().await;
-	let active_project = registry.get_active().map(|a| a.project_id.clone());
-	if let Some(project_id) = active_project {
-		if let Some(entry) = registry.get_mut(&project_id) {
+async fn control_pause(
+	State(state): State<Arc<AppState>>,
+	Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+	// CRITICAL: Use project_id from request params, NOT from global active state
+	let project_id = params.get("project_id").cloned();
+	if let Some(pid) = &project_id {
+		let mut registry = state.workspace_registry.lock().await;
+		if let Some(entry) = registry.get_mut(pid) {
 			entry.brain_paused = true;
-			tracing::info!("Brain operations paused for workspace {} via /control/pause", project_id);
-			return (StatusCode::OK, Json(serde_json::json!({"paused": true, "project_id": project_id})));
+			tracing::info!("Brain operations paused for workspace {} via /control/pause", pid);
+			return (StatusCode::OK, Json(serde_json::json!({"paused": true, "project_id": pid})));
 		}
 	}
-	drop(registry);
 	
 	// Fallback to global config for backward compatibility
     let mut config = state.config.write().await;
@@ -890,18 +901,20 @@ async fn control_pause(State(state): State<Arc<AppState>>) -> impl IntoResponse 
     (StatusCode::OK, Json(serde_json::json!({"paused": true})))
 }
 
-async fn control_resume(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-	// Get active workspace and update per-workspace pause state
-	let mut registry = state.workspace_registry.lock().await;
-	let active_project = registry.get_active().map(|a| a.project_id.clone());
-	if let Some(project_id) = active_project {
-		if let Some(entry) = registry.get_mut(&project_id) {
+async fn control_resume(
+	State(state): State<Arc<AppState>>,
+	Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+	// CRITICAL: Use project_id from request params, NOT from global active state
+	let project_id = params.get("project_id").cloned();
+	if let Some(pid) = &project_id {
+		let mut registry = state.workspace_registry.lock().await;
+		if let Some(entry) = registry.get_mut(pid) {
 			entry.brain_paused = false;
-			tracing::info!("Brain operations resumed for workspace {} via /control/resume", project_id);
-			return (StatusCode::OK, Json(serde_json::json!({"resumed": true, "project_id": project_id})));
+			tracing::info!("Brain operations resumed for workspace {} via /control/resume", pid);
+			return (StatusCode::OK, Json(serde_json::json!({"resumed": true, "project_id": pid})));
 		}
 	}
-	drop(registry);
 	
 	// Fallback to global config for backward compatibility
     let mut config = state.config.write().await;
@@ -912,26 +925,33 @@ async fn control_resume(State(state): State<Arc<AppState>>) -> impl IntoResponse
 }
 
 
-async fn control_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-	// Get active workspace for config path and pause state
-	let (workspace_root, brain_paused, project_id) = {
+async fn control_status(
+	State(state): State<Arc<AppState>>,
+	Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+	// CRITICAL: Use project_id from request params, NOT from global active state
+	let (workspace_root, brain_paused, project_id) = if let Some(pid) = params.get("project_id") {
 		let registry = state.workspace_registry.lock().await;
-		if let Some(active) = registry.get_active() {
-			let entry = registry.get(&active.project_id);
+		if let Some(entry) = registry.get(pid) {
 			(
-				Some(active.workspace_root.clone()),
-				entry.map(|e| e.brain_paused).unwrap_or(false),
-				Some(active.project_id.clone())
+				Some(entry.workspace_root.clone()),
+				entry.brain_paused,
+				Some(pid.clone())
 			)
 		} else {
-			(state.workspace_root.clone(), state.config.read().await.brain_paused, state.active_project_id.clone())
+			// Project not registered - use provided workspace_root or fallback
+			let ws = params.get("workspace_root").cloned();
+			(ws, false, Some(pid.clone()))
 		}
+	} else {
+		// Fallback to legacy single-workspace fields
+		(state.workspace_root.clone(), state.config.read().await.brain_paused, state.active_project_id.clone())
 	};
-	
-    let config = state.config.read().await.clone();
-    let path = DaemonConfig::config_path(workspace_root.as_deref());
-    (StatusCode::OK, Json(serde_json::json!({
-		"config": config, 
+
+	let config = state.config.read().await.clone();
+	let path = DaemonConfig::config_path(workspace_root.as_deref());
+	(StatusCode::OK, Json(serde_json::json!({
+		"config": config,
 		"config_path": path.to_string_lossy(),
 		"brain_paused": brain_paused,
 		"project_id": project_id
@@ -1495,7 +1515,7 @@ async fn purge_project(
 async fn daemon_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "status": "healthy",
-        "version": "0.11.0-beta",
+        "version": "0.11.1-beta",
         "workspace_root": state.workspace_root,
         "project_id": state.active_project_id,
         "features": [

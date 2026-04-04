@@ -443,9 +443,12 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 
 						// Try to get dynamic daemon version from the running process
 						try {
-							const healthResp = await DaemonManager.ping();
-							if (healthResp && (healthResp as any).version) {
-								daemonVer = (healthResp as any).version;
+							const projectId = this.brain?.getProjectId();
+							if (projectId) {
+								const healthResp = await DaemonManager.ping(projectId, this.workspaceRoot ?? undefined);
+								if (healthResp && (healthResp as any).version) {
+									daemonVer = (healthResp as any).version;
+								}
 							}
 						} catch (e) {
 							console.warn('Failed to ping daemon for version:', e);
@@ -711,7 +714,7 @@ export class DebugPanelProvider implements vscode.WebviewViewProvider {
 			// Parallelize token counting and daemon ping
 			const [tokenResult, healthResp] = await Promise.all([
 				MemoryClient.countTokens(promptPack).catch(() => null),
-				DaemonManager.ping().catch(() => null)
+				DaemonManager.ping(this.brain.getProjectId(), this.workspaceRoot ?? undefined).catch(() => null)
 			]);
 
 			const promptPackTokens = tokenResult?.tokens ?? null;

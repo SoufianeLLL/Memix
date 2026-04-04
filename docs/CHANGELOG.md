@@ -6,6 +6,18 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ---
 
+## [1.8.2] (Daemon: 0.11.1-beta) — 2026-04-04
+### Fixed
+- **Multi-Window Data Isolation:** Fixed critical bug where multiple IDE windows would mix data between projects.
+  - All API calls now explicitly pass `project_id` and `workspace_root` params instead of relying on global "active" state.
+  - `GET /health?project_id=X&workspace_root=Y` - health check now returns correct project context.
+  - `GET /api/v1/control/status?project_id=X` - settings now returned for correct project.
+  - `POST /api/v1/control/pause?project_id=X` and `POST /api/v1/control/resume?project_id=X` - pause/resume now scoped to correct project.
+  - Extension passes project context on every daemon request - no more cross-window contamination.
+  - SQLite brain database now correctly created in `{workspace_root}/.memix/brain.db` for each project.
+
+---
+
 ## [1.8.1] (Daemon: 0.11.0-beta) — 2026-04-04
 ### Fixed
 - **Removed 'Connect to Redis first' barrier:** Init command no longer requires Redis URL since SQLite is the primary storage.

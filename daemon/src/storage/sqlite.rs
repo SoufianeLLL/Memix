@@ -345,6 +345,11 @@ impl StorageBackend for SqliteStorage {
             .execute(&pool)
             .await?;
         
+        // VACUUM to shrink the database file and reclaim disk space
+        sqlx::query("VACUUM")
+            .execute(&pool)
+            .await?;
+        
         Ok(())
     }
     

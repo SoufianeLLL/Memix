@@ -192,7 +192,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		}
 	} else {
 		try {
-			await DaemonManager.ping();
+			await DaemonManager.ping(projectId, workspaceRoot);
 			setDaemonReadinessState({
 				kind: 'ready',
 				title: 'Memix Daemon Ready',
@@ -598,10 +598,10 @@ export async function activate(context: vscode.ExtensionContext) {
 				// to re-pause after init completes.
 				let wasPaused = false;
 				try {
-					const controlStatus = await MemoryClient.controlStatus();
+					const controlStatus = await MemoryClient.controlStatus(projectId, workspaceRoot);
 					wasPaused = controlStatus?.config?.brain_paused === true;
 					if (wasPaused) {
-						await MemoryClient.controlResume();
+						await MemoryClient.controlResume(projectId);
 					}
 				} catch {
 					// If control status is unreachable, proceed — init() will surface
@@ -642,7 +642,7 @@ export async function activate(context: vscode.ExtensionContext) {
 						'Keep active', 'Re-pause'
 					);
 					if (keepActive !== 'Keep active') {
-						await MemoryClient.controlPause();
+						await MemoryClient.controlPause(projectId);
 					}
 				}
 
