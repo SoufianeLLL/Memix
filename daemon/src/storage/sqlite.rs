@@ -345,10 +345,28 @@ impl StorageBackend for SqliteStorage {
             .execute(&pool)
             .await?;
         
+        sqlx::query("DELETE FROM embedding_metadata")
+            .execute(&pool)
+            .await?;
+        
+        sqlx::query("DELETE FROM embedding_vectors")
+            .execute(&pool)
+            .await?;
+        
         // VACUUM to shrink the database file and reclaim disk space
         sqlx::query("VACUUM")
             .execute(&pool)
             .await?;
+        
+        // Also clear the JSON mirror directory
+        let mirror_dir = self.get_db_path(project_id).await.parent()
+            .map(|p| p.join("brain"))
+            .unwrap_or_else(|| self.default_data_dir.join(project_id).join("brain"));
+        if mirror_dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&mirror_dir) {
+                tracing::warn!("Failed to clear mirror directory {:?}: {}", mirror_dir, e);
+            }
+        }
         
         Ok(())
     }

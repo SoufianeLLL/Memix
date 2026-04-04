@@ -6,6 +6,17 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ---
 
+## [1.8.3] (Daemon: 0.11.2-beta) — 2026-04-04
+### Fixed
+- **Multi-Window Data Isolation v2:** Complete fix for brain database storage issues.
+  - Memory endpoints (`get_memory`, `upsert_memory`, `purge_project`, `brain_size`) now ensure `workspace_root` is set from registry before every SQLite access.
+  - `register_workspace` now always sets `workspace_root` (not just for new workspaces) - fixes already-registered workspaces not getting their path set.
+  - `control_status` now loads config from the correct project-specific path instead of returning global config.
+  - Brain database now correctly created in `{workspace_root}/.memix/brain.db` for each project.
+- **UI:** Removed progress bar from brain database size display - now shows just the size (e.g., "3 MB").
+
+---
+
 ## [1.8.2] (Daemon: 0.11.1-beta) — 2026-04-04
 ### Fixed
 - **Multi-Window Data Isolation:** Fixed critical bug where multiple IDE windows would mix data between projects.

@@ -6,8 +6,8 @@
   <a href="https://marketplace.visualstudio.com/items?itemName=digitalvizellc.memix"><img src="https://img.shields.io/visual-studio-marketplace/v/digitalvizellc.memix?label=VS%20Marketplace&color=0078D4&logo=visual-studio-code&style=for-the-badge" alt="VS Marketplace" /></a>
   <img src="https://img.shields.io/badge/BUILT WITH-RUST / REDIS / TYPSCRIPT-blue?style=for-the-badge" alt="Daemon version" />
   <img src="https://img.shields.io/badge/INTEGRATED MODELS-AllMiniLM--L6--v2-yellow?style=for-the-badge" alt="Daemon version" />
-  <a href="./daemon"><img src="https://img.shields.io/badge/daemon-v0.11.1--beta-emerald?style=for-the-badge" alt="Daemon version" /></a>
-  <a href="./extension"><img src="https://img.shields.io/badge/extension-v1.8.2-orange?style=for-the-badge" alt="Extension version" /></a>
+  <a href="./daemon"><img src="https://img.shields.io/badge/daemon-v0.11.2--beta-emerald?style=for-the-badge" alt="Daemon version" /></a>
+  <a href="./extension"><img src="https://img.shields.io/badge/extension-v1.8.3-orange?style=for-the-badge" alt="Extension version" /></a>
 </p>
 
 <h1 align="center">

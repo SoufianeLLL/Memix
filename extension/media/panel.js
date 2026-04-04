@@ -783,18 +783,11 @@ window.addEventListener('message', function (e) {
 			return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 		}
 
-		var usedFormatted = formatBytes(data.brainDbUsedBytes);
-		var maxFormatted = formatBytes(data.brainDbMaxBytes);
-		var pct = Math.min((data.brainDbUsedBytes / data.brainDbMaxBytes) * 100, 100);
-		
-		var suffix = data.brainDbMaxEstimated ? ' (est.)' : '';
+		// Show only the brain database size (no progress bar)
 		var dbText = byId('brain-db-size-text');
-		if (dbText) dbText.textContent = pct.toFixed(1) + '% (' + usedFormatted + ' / ' + maxFormatted + ')' + suffix;
+		if (dbText) dbText.textContent = formatBytes(data.brainDbUsedBytes);
 		var dbBar = byId('brain-db-size-bar');
-		if (dbBar) {
-			dbBar.style.width = pct + '%';
-			dbBar.style.background = pct > 90 ? '#f44747' : pct > 75 ? '#cca700' : '#4ec9b0';
-		}
+		if (dbBar) dbBar.style.display = 'none'; // Hide progress bar
 
 		var keyCountEl = byId('keyCount');
 		if (keyCountEl) keyCountEl.textContent = data.keyCount;
