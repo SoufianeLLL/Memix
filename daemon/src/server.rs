@@ -1213,6 +1213,7 @@ async fn proxy_license_post<B: serde::Serialize, T: serde::de::DeserializeOwned>
 async fn get_memory(
     State(state): State<Arc<AppState>>,
     Path(project_id): Path<String>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     let validator = BrainValidator::new();
     if let Err(e) = validator.validate_project_id(&project_id) {
@@ -1220,12 +1221,21 @@ async fn get_memory(
     }
     
     // CRITICAL: Ensure workspace_root is set for this project before accessing SQLite
-    // Look up from registry and set it if available
+    // Priority: 1) Query param 2) Registry 3) Fallback
     {
-        let registry = state.workspace_registry.lock().await;
-        if let Some(entry) = registry.get(&project_id) {
+        let workspace_root = params.get("workspace_root").cloned();
+        if let Some(ws) = workspace_root {
+            // Use workspace_root from query param (highest priority)
             if let Some(hybrid) = state.storage.as_any().downcast_ref::<crate::storage::hybrid::HybridStorage>() {
-                hybrid.as_sqlite().set_workspace_root(&project_id, PathBuf::from(&entry.workspace_root)).await;
+                hybrid.as_sqlite().set_workspace_root(&project_id, PathBuf::from(&ws)).await;
+            }
+        } else {
+            // Fall back to registry
+            let registry = state.workspace_registry.lock().await;
+            if let Some(entry) = registry.get(&project_id) {
+                if let Some(hybrid) = state.storage.as_any().downcast_ref::<crate::storage::hybrid::HybridStorage>() {
+                    hybrid.as_sqlite().set_workspace_root(&project_id, PathBuf::from(&entry.workspace_root)).await;
+                }
             }
         }
     }
@@ -1251,6 +1261,7 @@ async fn get_memory(
 async fn upsert_memory(
     State(state): State<Arc<AppState>>,
     Path(project_id): Path<String>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
     Json(entry): Json<MemoryEntry>,
 ) -> impl IntoResponse {
 	if state.config.read().await.brain_paused {
@@ -1265,11 +1276,19 @@ async fn upsert_memory(
 	}
     
     // CRITICAL: Ensure workspace_root is set for this project before accessing SQLite
+    // Priority: 1) Query param 2) Registry 3) Fallback
     {
-        let registry = state.workspace_registry.lock().await;
-        if let Some(entry) = registry.get(&project_id) {
+        let workspace_root = params.get("workspace_root").cloned();
+        if let Some(ws) = workspace_root {
             if let Some(hybrid) = state.storage.as_any().downcast_ref::<crate::storage::hybrid::HybridStorage>() {
-                hybrid.as_sqlite().set_workspace_root(&project_id, PathBuf::from(&entry.workspace_root)).await;
+                hybrid.as_sqlite().set_workspace_root(&project_id, PathBuf::from(&ws)).await;
+            }
+        } else {
+            let registry = state.workspace_registry.lock().await;
+            if let Some(entry) = registry.get(&project_id) {
+                if let Some(hybrid) = state.storage.as_any().downcast_ref::<crate::storage::hybrid::HybridStorage>() {
+                    hybrid.as_sqlite().set_workspace_root(&project_id, PathBuf::from(&entry.workspace_root)).await;
+                }
             }
         }
     }
@@ -1532,17 +1551,26 @@ async fn delete_memory(
 async fn purge_project(
     State(state): State<Arc<AppState>>,
     Path(project_id): Path<String>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
 	if state.config.read().await.brain_paused {
 		return (StatusCode::SERVICE_UNAVAILABLE, "Brain operations are paused globally").into_response();
 	}
     
     // CRITICAL: Ensure workspace_root is set for this project before accessing SQLite
+    // Priority: 1) Query param 2) Registry 3) Fallback
     {
-        let registry = state.workspace_registry.lock().await;
-        if let Some(entry) = registry.get(&project_id) {
+        let workspace_root = params.get("workspace_root").cloned();
+        if let Some(ws) = workspace_root {
             if let Some(hybrid) = state.storage.as_any().downcast_ref::<crate::storage::hybrid::HybridStorage>() {
-                hybrid.as_sqlite().set_workspace_root(&project_id, PathBuf::from(&entry.workspace_root)).await;
+                hybrid.as_sqlite().set_workspace_root(&project_id, PathBuf::from(&ws)).await;
+            }
+        } else {
+            let registry = state.workspace_registry.lock().await;
+            if let Some(entry) = registry.get(&project_id) {
+                if let Some(hybrid) = state.storage.as_any().downcast_ref::<crate::storage::hybrid::HybridStorage>() {
+                    hybrid.as_sqlite().set_workspace_root(&project_id, PathBuf::from(&entry.workspace_root)).await;
+                }
             }
         }
     }

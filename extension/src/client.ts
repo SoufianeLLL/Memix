@@ -619,9 +619,12 @@ export class MemoryClient {
 	/**
 	 * Retrieves memory from the Rust Daemon over localhost HTTP
 	 */
-	static async getMemory(projectId: string): Promise<MemoryEntry[]> {
+	static async getMemory(projectId: string, workspaceRoot?: string): Promise<MemoryEntry[]> {
 		return new Promise((resolve, reject) => {
-			const requestPath = `${API_PREFIX}/memory/${projectId}`;
+			let requestPath = `${API_PREFIX}/memory/${projectId}`;
+			if (workspaceRoot) {
+				requestPath += `?workspace_root=${encodeURIComponent(workspaceRoot)}`;
+			}
 			const options = getRequestOptions('GET', requestPath);
 			const req = http.request(options, (res) => {
 				if (res.statusCode !== 200) {
@@ -645,9 +648,12 @@ export class MemoryClient {
 	/**
 	 * Purges an entire project's memory via the Rust Daemon
 	 */
-	static async purgeProject(projectId: string): Promise<void> {
+	static async purgeProject(projectId: string, workspaceRoot?: string): Promise<void> {
 		return new Promise((resolve, reject) => {
-			const requestPath = `${API_PREFIX}/memory/${projectId}`;
+			let requestPath = `${API_PREFIX}/memory/${projectId}`;
+			if (workspaceRoot) {
+				requestPath += `?workspace_root=${encodeURIComponent(workspaceRoot)}`;
+			}
 			const options: http.RequestOptions = getRequestOptions('DELETE', requestPath);
 			const req = http.request(options, (res) => {
 				if (res.statusCode === 204) {
@@ -683,10 +689,13 @@ export class MemoryClient {
 	/**
 	 * Upserts a single memory entry via the Rust Daemon over localhost HTTP
 	 */
-	static async upsertMemory(projectId: string, entry: MemoryEntry): Promise<void> {
+	static async upsertMemory(projectId: string, entry: MemoryEntry, workspaceRoot?: string): Promise<void> {
 		return new Promise((resolve, reject) => {
 			const data = JSON.stringify(entry);
-			const requestPath = `${API_PREFIX}/memory/${projectId}`;
+			let requestPath = `${API_PREFIX}/memory/${projectId}`;
+			if (workspaceRoot) {
+				requestPath += `?workspace_root=${encodeURIComponent(workspaceRoot)}`;
+			}
 			const options: http.RequestOptions = {
 				...getRequestOptions('POST', requestPath),
 				headers: {

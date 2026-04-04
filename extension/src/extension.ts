@@ -215,7 +215,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// --- Initialize workspace-dependent modules (only if workspace is open) ---
 	if (workspaceRoot && projectId) {
-		brain = new BrainManager(projectId);
+		brain = new BrainManager(projectId, workspaceRoot);
 		panelProvider.setBrain(brain);
 		
 		// Register this workspace with the daemon (multi-tenant)

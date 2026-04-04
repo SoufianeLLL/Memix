@@ -1,14 +1,16 @@
 import * as vscode from 'vscode';
 import { validateBrainWrite } from './validator';
-import { BRAIN_KEYS, BrainMeta, MAX_BRAIN_SIZE_KB } from '../utils/constants';
+import { BRAIN_KEYS, BrainMeta } from '../utils/constants';
 import { MemoryClient, MemoryEntry, MemoryKind, MemorySource } from '../client';
 
 export class BrainManager {
     private projectId: string;
+    private workspaceRoot?: string;
     private writeLog: { key: string; timestamp: number; sizeBytes: number }[] = [];
 
-    constructor(projectId: string) {
+    constructor(projectId: string, workspaceRoot?: string) {
         this.projectId = projectId;
+        this.workspaceRoot = workspaceRoot;
     }
 
     getProjectId(): string {
@@ -21,6 +23,10 @@ export class BrainManager {
         this.writeLog = []; // Reset write log for new workspace
     }
 
+    setWorkspaceRoot(workspaceRoot: string): void {
+        this.workspaceRoot = workspaceRoot;
+    }
+
     getPrefix(): string {
         return `brain:${this.projectId}`;
     }
@@ -28,7 +34,7 @@ export class BrainManager {
     // --- READ ---
     async get(key: string): Promise<any | null> {
         try {
-            const memory = await MemoryClient.getMemory(this.projectId);
+            const memory = await MemoryClient.getMemory(this.projectId, this.workspaceRoot);
             const entry = memory.find(e => e.id === key);
             if (!entry) return null;
 
@@ -79,7 +85,7 @@ export class BrainManager {
         };
 
         try {
-            await MemoryClient.upsertMemory(this.projectId, entry);
+            await MemoryClient.upsertMemory(this.projectId, entry, this.workspaceRoot);
 
             const newValueSize = Buffer.byteLength(entry.content, 'utf8');
             this.writeLog.push({
@@ -105,7 +111,7 @@ export class BrainManager {
     // --- GET ALL ---
     async getAll(): Promise<Record<string, any>> {
         const parsed: Record<string, any> = {};
-        const memory = await MemoryClient.getMemory(this.projectId);
+        const memory = await MemoryClient.getMemory(this.projectId, this.workspaceRoot);
         for (const entry of memory) {
             try {
                 parsed[entry.id] = JSON.parse(entry.content);
@@ -118,7 +124,7 @@ export class BrainManager {
 
     // --- CLEAR ALL ---
     async clearAll(): Promise<void> {
-        await MemoryClient.purgeProject(this.projectId);
+        await MemoryClient.purgeProject(this.projectId, this.workspaceRoot);
     }
 
     // --- SIZE ---
@@ -251,7 +257,7 @@ export class BrainManager {
         // Write all missing entries in parallel — N HTTP calls to the daemon,
         // which are all fast Unix socket operations. No sequential bottleneck.
         const results = await Promise.allSettled(
-            entries.map(entry => MemoryClient.upsertMemory(this.projectId, entry))
+            entries.map(entry => MemoryClient.upsertMemory(this.projectId, entry, this.workspaceRoot))
         );
 
         const failures = results
@@ -299,7 +305,7 @@ export class BrainManager {
             access_count: 0,
             last_accessed_at: null
         };
-        await MemoryClient.upsertMemory(this.projectId, entry);
+        await MemoryClient.upsertMemory(this.projectId, entry, this.workspaceRoot);
     }
 
     // --- CHECKPOINT ---
