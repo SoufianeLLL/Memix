@@ -5,6 +5,9 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use ring::digest::{digest, SHA256};
 use tracing_subscriber;
 
+pub mod error;
+pub mod retry;
+
 const BUNDLED_LICENSE_PUBLIC_KEY_DER: &[u8] = include_bytes!("../keys/memix_public.der");
 
 fn install_panic_hook() {

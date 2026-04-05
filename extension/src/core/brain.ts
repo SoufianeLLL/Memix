@@ -274,6 +274,15 @@ export class BrainManager {
         // Meta written once — after all entries are confirmed written.
         await this.updateMeta();
 
+        // Auto-export to JSON mirror files for human readability
+        if (this.workspaceRoot) {
+            try {
+                await MemoryClient.exportBrainMirror(this.projectId, this.workspaceRoot);
+            } catch (e) {
+                console.warn('Memix: Failed to export brain mirror after init', e);
+            }
+        }
+
         return { written: toWrite.map(d => d.key), skipped };
     }
 
@@ -287,7 +296,7 @@ export class BrainManager {
             createdAt: existingMeta?.createdAt || new Date().toISOString(),
             lastAccessed: new Date().toISOString(),
             totalSessions: existingMeta?.totalSessions || 0,
-            brainVersion: '1.8.3',
+            brainVersion: '1.8.4',
             sizeBytes: sizeInfo.totalBytes
         };
 

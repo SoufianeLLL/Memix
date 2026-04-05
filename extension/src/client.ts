@@ -550,50 +550,6 @@ export class MemoryClient {
 		});
 	}
 
-	static async exportBrainMirror(projectId: string): Promise<{ written: number }> {
-		return new Promise((resolve, reject) => {
-			const requestPath = `${API_PREFIX}/brain/export/${encodeURIComponent(projectId)}`;
-			const options = getRequestOptions('POST', requestPath);
-			const req = http.request(options, (res) => {
-				if (res.statusCode !== 200) {
-					buildDaemonError(res, requestPath).then(reject, reject);
-					return;
-				}
-				readResponseBody(res).then((data) => {
-					try {
-						resolve(JSON.parse(data || '{}'));
-					} catch (e) {
-						reject(e);
-					}
-				}, reject);
-			});
-			req.on('error', reject);
-			req.end();
-		});
-	}
-
-	static async importBrainMirror(projectId: string): Promise<{ imported: number }> {
-		return new Promise((resolve, reject) => {
-			const requestPath = `${API_PREFIX}/brain/import/${encodeURIComponent(projectId)}`;
-			const options = getRequestOptions('POST', requestPath);
-			const req = http.request(options, (res) => {
-				if (res.statusCode !== 200) {
-					buildDaemonError(res, requestPath).then(reject, reject);
-					return;
-				}
-				readResponseBody(res).then((data) => {
-					try {
-						resolve(JSON.parse(data || '{}'));
-					} catch (e) {
-						reject(e);
-					}
-				}, reject);
-			});
-			req.on('error', reject);
-			req.end();
-		});
-	}
-
 	static async migrateProject(projectId: string): Promise<{ migrated_entries: number; schema_version: number }> {
 		return new Promise((resolve, reject) => {
 			const requestPath = `${API_PREFIX}/brain/migrate/${encodeURIComponent(projectId)}`;
@@ -734,6 +690,66 @@ export class MemoryClient {
 				readResponseBody(res).then((data) => {
 					try {
 						resolve(JSON.parse(data));
+					} catch (e) {
+						reject(e);
+					}
+				}, reject);
+			});
+			req.on('error', reject);
+			req.end();
+		});
+	}
+
+	/**
+	 * Export brain to JSON mirror files via the Rust Daemon
+	 */
+	static async exportBrainMirror(projectId: string, workspaceRoot?: string): Promise<number> {
+		return new Promise((resolve, reject) => {
+			let requestPath = `${API_PREFIX}/brain/export/${projectId}`;
+			if (workspaceRoot) {
+				requestPath += `?workspace_root=${encodeURIComponent(workspaceRoot)}`;
+			}
+			const options = getRequestOptions('POST', requestPath);
+			const req = http.request(options, (res) => {
+				if (res.statusCode !== 200) {
+					buildDaemonError(res, requestPath).then(reject, reject);
+					return;
+				}
+
+				readResponseBody(res).then((data) => {
+					try {
+						const result = JSON.parse(data);
+						resolve(result.exported || 0);
+					} catch (e) {
+						reject(e);
+					}
+				}, reject);
+			});
+			req.on('error', reject);
+			req.end();
+		});
+	}
+
+	/**
+	 * Import brain from JSON mirror files via the Rust Daemon
+	 */
+	static async importBrainMirror(projectId: string, workspaceRoot?: string): Promise<number> {
+		return new Promise((resolve, reject) => {
+			let requestPath = `${API_PREFIX}/brain/import/${projectId}`;
+			if (workspaceRoot) {
+				requestPath += `?workspace_root=${encodeURIComponent(workspaceRoot)}`;
+			}
+			const options = getRequestOptions('POST', requestPath);
+			const req = http.request(options, (res) => {
+				if (res.statusCode !== 200) {
+					buildDaemonError(res, requestPath).then(reject, reject);
+					return;
+				}
+
+				readResponseBody(res).then((data) => {
+					try {
+						const result = JSON.parse(data);
+						resolve(result.imported || 0);
 					} catch (e) {
 						reject(e);
 					}

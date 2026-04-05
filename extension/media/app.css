@@ -282,6 +282,11 @@
   .gap-x-2 {
     column-gap: calc(var(--spacing) * 2);
   }
+  .truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .rounded-none {
     border-radius: 0;
   }

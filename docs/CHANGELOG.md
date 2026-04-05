@@ -6,6 +6,41 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ---
 
+## [1.8.4] (Daemon: 0.11.3-beta) — 2026-04-05
+### Fixed
+- **Double Database Creation:** Fixed bug where brain initialization created two databases - one in `.memix/` and another in `.memix/default/`.
+  - `HybridStorage` now correctly uses `workspace_root/.memix` as primary path.
+  - Removed unnecessary fallback directory creation.
+- **JSON Mirror Path Mismatch:** Fixed path inconsistency between purge and export.
+  - Both now use `.memix/brain/` directory (was `.memix/mirror/` for export).
+- **Auto-Export After Init:** Brain initialization now automatically exports to JSON mirror files.
+
+### Added
+- **Background Health Checker:** New `BrainHealthChecker` class that runs every 60 seconds.
+  - Verifies database file exists.
+  - Checks required brain keys are present.
+  - Ensures JSON mirror directory has files.
+  - Auto-repairs any missing components.
+- **Typed Error Handling:** New `daemon/src/error.rs` with `MemixError` enum.
+  - Errors carry retry information via `is_retryable()` method.
+  - Better error messages for users.
+- **Retry Logic:** New `daemon/src/retry.rs` with exponential backoff.
+  - `with_retry()` function for resilient operations.
+  - Configurable retry policies (quick, standard, aggressive).
+- **Storage Compression:** New `daemon/src/storage/compression.rs`.
+  - zstd-based compression for brain entries.
+  - 50-70% size reduction for typical projects.
+- **Smart Context Compiler:** New `extension/src/core/contextCompiler.ts`.
+  - Exports brain context within character budget.
+  - Prioritizes important keys (identity, patterns, decisions).
+  - Supports model-specific budgets (Claude, GPT-4, Gemini).
+
+### Changed
+- **Export/Import Endpoints:** Now accept `workspace_root` query parameter.
+- **Dependencies:** Added `zstd` crate for compression support.
+
+---
+
 ## [1.8.3] (Daemon: 0.11.2-beta) — 2026-04-04
 ### Fixed
 - **Multi-Window Data Isolation v2:** Complete fix for brain database storage issues.

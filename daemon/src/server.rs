@@ -229,9 +229,16 @@ pub async fn get_patterns(
 async fn import_brain_json(
     State(state): State<Arc<AppState>>,
     Path(project_id): Path<String>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     if state.config.read().await.brain_paused {
         return (StatusCode::SERVICE_UNAVAILABLE, "Brain operations are paused globally").into_response();
+    }
+    // Set workspace_root if provided
+    if let Some(ws) = params.get("workspace_root") {
+        if let Some(hybrid) = state.storage.as_any().downcast_ref::<crate::storage::hybrid::HybridStorage>() {
+            hybrid.as_sqlite().set_workspace_root(&project_id, PathBuf::from(ws)).await;
+        }
     }
     match state.storage.import_project_from_json(&project_id).await {
         Ok(imported) => (StatusCode::OK, Json(serde_json::json!({"imported": imported}))).into_response(),
@@ -642,9 +649,17 @@ async fn get_observer_changes(State(state): State<Arc<AppState>>) -> impl IntoRe
 async fn export_brain_json(
 	State(state): State<Arc<AppState>>,
 	Path(project_id): Path<String>,
+	Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
+	// Set workspace_root if provided
+	if let Some(ws) = params.get("workspace_root") {
+		if let Some(hybrid) = state.storage.as_any().downcast_ref::<crate::storage::hybrid::HybridStorage>() {
+			hybrid.as_sqlite().set_workspace_root(&project_id, PathBuf::from(ws)).await;
+		}
+	}
+	
 	match state.storage.export_project_to_json(&project_id).await {
-		Ok(written) => (StatusCode::OK, Json(serde_json::json!({"written": written}))).into_response(),
+		Ok(written) => (StatusCode::OK, Json(serde_json::json!({"exported": written}))).into_response(),
 		Err(e) => {
 			tracing::error!("Failed to export brain JSON for {}: {}", project_id, e);
 			let msg = e.to_string();
@@ -1590,7 +1605,7 @@ async fn purge_project(
 async fn daemon_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "status": "healthy",
-        "version": "0.11.2-beta",
+        "version": "0.11.3-beta",
         "workspace_root": state.workspace_root,
         "project_id": state.active_project_id,
         "features": [

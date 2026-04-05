@@ -1,6 +1,6 @@
 [package]
 name = "memix-daemon"
-version = "0.11.2-beta"
+version = "0.11.3-beta"
 edition = "2021"
 authors = ["DigitalVize LLC"]
 description = "High-performance Memix backend daemon for persistent AI memory"
@@ -48,6 +48,7 @@ base64 = "0.22"
 tiktoken-rs = "0.9.1"
 tree-sitter-c-sharp = "0.23"
 tree-sitter-ruby = "0.23"
+zstd = "0.13"
 tree-sitter-swift = "0.7.1"
 tree-sitter-kotlin-ng = "1.0.0"
 tree-sitter-php = "0.23"

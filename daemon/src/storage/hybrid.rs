@@ -28,14 +28,15 @@ pub struct HybridStorage {
 impl HybridStorage {
     /// Create hybrid storage. Redis is optional based on config.
     pub async fn new(config: &AppConfig) -> Result<Self> {
-        let data_dir = config.data_dir.clone()
-            .map(PathBuf::from)
+        // Use workspace_root if available, otherwise use a fallback that won't be created
+        let data_dir = config.workspace_root.clone()
+            .map(|ws| PathBuf::from(&ws).join(".memix"))
             .unwrap_or_else(|| {
-                let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-                home.join(".memix").join("data")
+                // Fallback - but this shouldn't normally be used
+                PathBuf::from(".memix/default")
             });
         
-        // SQLite is always created
+        // SQLite is always created (but doesn't create data_dir until needed)
         let sqlite = SqliteStorage::new(data_dir).await?;
         
         // Redis is optional - only if URL is configured

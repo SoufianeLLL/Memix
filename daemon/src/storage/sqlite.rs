@@ -26,8 +26,10 @@ pub struct SqliteStorage {
 
 impl SqliteStorage {
     /// Create SQLite storage manager
+    /// Note: default_data_dir is NOT created here - only when actually needed
     pub async fn new(default_data_dir: PathBuf) -> Result<Self> {
-        std::fs::create_dir_all(&default_data_dir)?;
+        // Don't create default_data_dir here - it may never be used
+        // Directories are created on-demand in get_pool()
         
         Ok(Self {
             pools: RwLock::new(std::collections::HashMap::new()),
@@ -373,10 +375,10 @@ impl StorageBackend for SqliteStorage {
     
     async fn export_project_to_json(&self, project_id: &str) -> Result<u64> {
         let entries = self.get_entries(project_id).await?;
-        // Mirror stored at {workspace_root}/.memix/mirror/
+        // Mirror stored at {workspace_root}/.memix/brain/ (same location purge_project clears)
         let mirror_dir = self.get_db_path(project_id).await.parent()
-            .map(|p| p.join("mirror"))
-            .unwrap_or_else(|| self.default_data_dir.join(project_id).join("mirror"));
+            .map(|p| p.join("brain"))
+            .unwrap_or_else(|| self.default_data_dir.join(project_id).join("brain"));
         std::fs::create_dir_all(&mirror_dir)?;
         
         let mut written: u64 = 0;
@@ -391,10 +393,10 @@ impl StorageBackend for SqliteStorage {
     }
     
     async fn import_project_from_json(&self, project_id: &str) -> Result<u64> {
-        // Mirror stored at {workspace_root}/.memix/mirror/
+        // Mirror stored at {workspace_root}/.memix/brain/ (same location purge_project clears)
         let mirror_dir = self.get_db_path(project_id).await.parent()
-            .map(|p| p.join("mirror"))
-            .unwrap_or_else(|| self.default_data_dir.join(project_id).join("mirror"));
+            .map(|p| p.join("brain"))
+            .unwrap_or_else(|| self.default_data_dir.join(project_id).join("brain"));
         if !mirror_dir.exists() {
             return Ok(0);
         }

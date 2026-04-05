@@ -105,3 +105,5 @@ package-lock.json
 .agents/rules/
 
 .windsurf/rules/
+
+examples/

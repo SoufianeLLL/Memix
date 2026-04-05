@@ -5,6 +5,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
 
+pub mod compression;
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct RedisStats {
     pub used_bytes: u64,

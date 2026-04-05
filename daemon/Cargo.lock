@@ -2028,6 +2028,7 @@ dependencies = [
  "tree-sitter-typescript",
  "uuid",
  "walkdir",
+ "zstd",
 ]
 
 [[package]]

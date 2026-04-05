@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { BrainManager } from './core/brain';
+import { BrainHealthChecker } from './core/healthChecker';
 import { DebugPanelProvider } from './panel/debug-panel';
 import { exportBrain, importBrain } from './utils/exporter';
 import { hashProjectId } from './utils/crypto';
@@ -217,6 +218,11 @@ export async function activate(context: vscode.ExtensionContext) {
 	if (workspaceRoot && projectId) {
 		brain = new BrainManager(projectId, workspaceRoot);
 		panelProvider.setBrain(brain);
+		
+		// Start health checker for auto-repair
+		const healthChecker = new BrainHealthChecker(brain, workspaceRoot, projectId, 60000);
+		healthChecker.start();
+		context.subscriptions.push({ dispose: () => healthChecker.stop() });
 		
 		// Register this workspace with the daemon (multi-tenant)
 		if (daemonReadinessState.kind === 'ready') {
@@ -515,8 +521,8 @@ export async function activate(context: vscode.ExtensionContext) {
 			if (!(await ensureDaemonReady())) { return; }
 			if (!requireWorkspace()) { return; }
 			try {
-				const res = await MemoryClient.exportBrainMirror(brain.getProjectId());
-				vscode.window.showInformationMessage(`Memix: Exported ${res.written ?? 0} entries to .memix/brain`);
+				const exported = await MemoryClient.exportBrainMirror(brain.getProjectId(), workspaceRoot);
+				vscode.window.showInformationMessage(`Memix: Exported ${exported} entries to .memix/brain`);
 				panelProvider?.sendUpdate();
 			} catch (err: any) {
 				vscode.window.showErrorMessage(`Memix mirror export failed: ${err.message}`);
@@ -530,8 +536,8 @@ export async function activate(context: vscode.ExtensionContext) {
 			if (!(await ensureDaemonReady())) { return; }
 			if (!requireWorkspace()) { return; }
 			try {
-				const res = await MemoryClient.importBrainMirror(brain.getProjectId());
-				vscode.window.showInformationMessage(`Memix: Imported ${res.imported ?? 0} entries from .memix/brain`);
+				const imported = await MemoryClient.importBrainMirror(brain.getProjectId(), workspaceRoot);
+				vscode.window.showInformationMessage(`Memix: Imported ${imported} entries from .memix/brain`);
 				panelProvider?.sendUpdate();
 			} catch (err: any) {
 				vscode.window.showErrorMessage(`Memix mirror import failed: ${err.message}`);
