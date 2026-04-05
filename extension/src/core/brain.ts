@@ -7,6 +7,7 @@ export class BrainManager {
     private projectId: string;
     private workspaceRoot?: string;
     private writeLog: { key: string; timestamp: number; sizeBytes: number }[] = [];
+    private initPromise: Promise<{ written: string[]; skipped: string[] }> | null = null;
 
     constructor(projectId: string, workspaceRoot?: string) {
         this.projectId = projectId;
@@ -152,7 +153,26 @@ export class BrainManager {
     // Returns which keys were written and which already existed.
     // Does ONE read to determine state, then writes all missing keys
     // in parallel, then updates meta ONCE at the end.
+    // Uses lock to prevent concurrent initialization.
     async init(projectId?: string): Promise<{ written: string[]; skipped: string[] }> {
+        // If already initializing, return the existing promise
+        if (this.initPromise) {
+            console.log('Memix: Init already in progress, waiting for completion...');
+            return this.initPromise;
+        }
+
+        // Create the init promise and store it
+        this.initPromise = this.doInit(projectId);
+        
+        try {
+            return await this.initPromise;
+        } finally {
+            // Clear the lock when done
+            this.initPromise = null;
+        }
+    }
+
+    private async doInit(projectId?: string): Promise<{ written: string[]; skipped: string[] }> {
         if (projectId) {
             this.projectId = projectId;
         }
@@ -274,13 +294,12 @@ export class BrainManager {
         // Meta written once — after all entries are confirmed written.
         await this.updateMeta();
 
-        // Auto-export to JSON mirror files for human readability
+        // Auto-export to JSON mirror files for human readability (non-blocking)
         if (this.workspaceRoot) {
-            try {
-                await MemoryClient.exportBrainMirror(this.projectId, this.workspaceRoot);
-            } catch (e) {
+            // Fire and forget - don't block init completion
+            MemoryClient.exportBrainMirror(this.projectId, this.workspaceRoot).catch(e => {
                 console.warn('Memix: Failed to export brain mirror after init', e);
-            }
+            });
         }
 
         return { written: toWrite.map(d => d.key), skipped };
@@ -296,7 +315,7 @@ export class BrainManager {
             createdAt: existingMeta?.createdAt || new Date().toISOString(),
             lastAccessed: new Date().toISOString(),
             totalSessions: existingMeta?.totalSessions || 0,
-            brainVersion: '1.8.4',
+            brainVersion: '1.8.5',
             sizeBytes: sizeInfo.totalBytes
         };
 

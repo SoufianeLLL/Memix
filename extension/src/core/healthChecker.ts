@@ -48,10 +48,12 @@ export class BrainHealthChecker {
             return; // Already running
         }
         
-        // Run initial check immediately
-        this.check().catch(err => {
-            console.warn('Memix: Initial health check failed', err);
-        });
+        // Delay first check by 5 seconds to avoid race with manual init on startup
+        setTimeout(() => {
+            this.check().catch(err => {
+                console.warn('Memix: Initial health check failed', err);
+            });
+        }, 5000);
         
         // Schedule periodic checks
         this.interval = setInterval(() => {
@@ -60,7 +62,7 @@ export class BrainHealthChecker {
             });
         }, this.checkIntervalMs);
         
-        console.log(`Memix: Health checker started (interval: ${this.checkIntervalMs}ms)`);
+        console.log(`Memix: Health checker started (interval: ${this.checkIntervalMs}ms, first check in 5s)`);
     }
     
     /**

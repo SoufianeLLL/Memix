@@ -6,6 +6,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ---
 
+## [1.8.5] (Daemon: 0.11.3-beta) — 2026-04-05
+### Fixed
+- **Slow/Hanging Brain Initialization:** Fixed race condition causing init to hang for minutes.
+  - Added init lock (`initPromise`) to prevent concurrent `brain.init()` calls.
+  - Health checker now delays first check by 5 seconds to avoid startup race.
+  - Made `exportBrainMirror` non-blocking so init completes quickly.
+
+---
+
 ## [1.8.4] (Daemon: 0.11.3-beta) — 2026-04-05
 ### Fixed
 - **Double Database Creation:** Fixed bug where brain initialization created two databases - one in `.memix/` and another in `.memix/default/`.
