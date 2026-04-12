@@ -1961,7 +1961,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "memix-daemon"
-version = "0.11.2-beta"
+version = "0.11.3-beta"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1982,6 +1982,7 @@ dependencies = [
  "hyper",
  "hyper-rustls",
  "hyper-util",
+ "lazy_static",
  "libc",
  "mini-moka",
  "notify",
@@ -2003,6 +2004,7 @@ dependencies = [
  "rustls 0.23.37",
  "serde",
  "serde_json",
+ "shell-words",
  "sqlx",
  "tantivy",
  "thiserror 1.0.69",
@@ -2028,6 +2030,7 @@ dependencies = [
  "tree-sitter-typescript",
  "uuid",
  "walkdir",
+ "which",
  "zstd",
 ]
 
@@ -3786,6 +3789,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "shell-words"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc6fe69c597f9c37bfeeeeeb33da3530379845f10be461a66d16d03eca2ded77"
+
+[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5343,6 +5352,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22cfaf3c063993ff62e73cb4311efde4db1efb31ab78a3e5c457939ad5cc0bed"
 dependencies = [
  "rustls-pki-types",
+]
+
+[[package]]
+name = "which"
+version = "8.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81995fafaaaf6ae47a7d0cc83c67caf92aeb7e5331650ae6ff856f7c0c60c459"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

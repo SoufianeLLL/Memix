@@ -1,0 +1,412 @@
+# Memix Built-in TOML Filters
+# These filters reduce token consumption by 60-90% for common commands
+
+schema_version = 1
+
+# ---------------------------------------------------------------------------
+# Git Commands
+# ---------------------------------------------------------------------------
+
+[filters.git-status]
+description = "Compact git status - strip branch info decorations"
+match_command = "^git\\s+status"
+strip_ansi = true
+strip_lines_matching = [
+  "^On branch",
+  "^Your branch is",
+  "nothing to commit",
+  "working tree clean",
+]
+max_lines = 30
+on_empty = "git: clean"
+
+[filters.git-log]
+description = "Compact git log - one line per commit"
+match_command = "^git\\s+log"
+strip_ansi = true
+max_lines = 20
+
+[filters.git-diff]
+description = "Compact git diff - strip file mode changes"
+match_command = "^git\\s+diff"
+strip_ansi = true
+strip_lines_matching = [
+  "^index [a-f0-9]+\\.{2}",
+  "^diff --git",
+  "^--- a/",
+  "^\\+\\+\\+ b/",
+]
+max_lines = 100
+
+[filters.git-add]
+description = "Silent git add - only show errors"
+match_command = "^git\\s+add"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 5
+on_empty = "git add: ok"
+
+[filters.git-commit]
+description = "Compact git commit output"
+match_command = "^git\\s+commit"
+strip_ansi = true
+strip_lines_matching = [
+  "^\\[",
+  "^\\s*$",
+  "^create mode",
+]
+max_lines = 10
+
+[filters.git-push]
+description = "Compact git push - show summary only"
+match_command = "^git\\s+push"
+strip_ansi = true
+max_lines = 10
+
+[filters.git-pull]
+description = "Compact git pull - strip merge details"
+match_command = "^git\\s+pull"
+strip_ansi = true
+strip_lines_matching = [
+  "^Updating [a-f0-9]+\\.{2}",
+  "^Fast-forward",
+]
+max_lines = 15
+
+# ---------------------------------------------------------------------------
+# Package Managers
+# ---------------------------------------------------------------------------
+
+[filters.npm-install]
+description = "Silent npm install - only show errors"
+match_command = "^npm\\s+(i|install|ci)"
+strip_ansi = true
+strip_lines_matching = [
+  "^$",
+  "^npm WARN",
+  "up to date",
+  "added",
+  "removed",
+]
+max_lines = 5
+on_empty = "npm install: ok"
+
+[filters.yarn-install]
+description = "Silent yarn install"
+match_command = "^yarn(\\s+install)?"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 5
+on_empty = "yarn: ok"
+
+[filters.pnpm-install]
+description = "Silent pnpm install"
+match_command = "^pnpm\\s+install"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 5
+on_empty = "pnpm: ok"
+
+[filters.pip-install]
+description = "Compact pip install - strip download progress"
+match_command = "^pip(3)?\\s+install"
+strip_ansi = true
+strip_lines_matching = [
+  "^Collecting",
+  "^  Using cached",
+  "^Downloading",
+  "Successfully installed",
+]
+max_lines = 10
+on_empty = "pip: ok"
+
+[filters.cargo-build]
+description = "Compact cargo build - strip compilation progress"
+match_command = "^cargo\\s+(build|check|clippy)"
+strip_ansi = true
+strip_lines_matching = [
+  "^   Compiling",
+  "^    Checking",
+  "^    Finished",
+  "^     Running",
+]
+max_lines = 30
+
+[filters.cargo-test]
+description = "Compact cargo test - show failures only"
+match_command = "^cargo\\s+test"
+strip_ansi = true
+strip_lines_matching = [
+  "^running \\d+ tests",
+  "^test result:",
+  "^$",
+]
+keep_lines_matching = ["FAILED", "error", "panic"]
+max_lines = 30
+on_empty = "cargo test: passed"
+
+[filters.cargo-update]
+description = "Compact cargo update output"
+match_command = "^cargo\\s+update"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 20
+
+# ---------------------------------------------------------------------------
+# Linters & Formatters
+# ---------------------------------------------------------------------------
+
+[filters.eslint]
+description = "Compact ESLint output"
+match_command = "^eslint|^npx\\s+eslint"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 50
+on_empty = "eslint: ok"
+
+[filters.prettier]
+description = "Silent prettier - only show errors"
+match_command = "^prettier|^npx\\s+prettier"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 5
+on_empty = "prettier: ok"
+
+[filters.ruff]
+description = "Compact ruff lint output"
+match_command = "^ruff\\s+(check|format)"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 30
+on_empty = "ruff: ok"
+
+[filters.biome]
+description = "Compact Biome lint/format output"
+match_command = "^biome\\b"
+strip_ansi = true
+strip_lines_matching = [
+  "^\\s*$",
+  "^Checked \\d+ file",
+  "^Fixed \\d+ file",
+]
+max_lines = 50
+on_empty = "biome: ok"
+
+[filters.shellcheck]
+description = "Compact shellcheck output"
+match_command = "^shellcheck"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 30
+
+[files.yamllint]
+description = "Compact yamllint output"
+match_command = "^yamllint"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 30
+
+# ---------------------------------------------------------------------------
+# Build Tools
+# ---------------------------------------------------------------------------
+
+[filters.turbo]
+description = "Compact Turborepo build output"
+match_command = "^turbo|^npx\\s+turbo"
+strip_ansi = true
+strip_lines_matching = [
+  "^\\s*$",
+  "^ELAPSED",
+  "^\\u2500",
+]
+max_lines = 30
+
+[filters.nx]
+description = "Compact Nx build output"
+match_command = "^nx\\s+(build|test|lint)"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 30
+
+[filters.make]
+description = "Compact make output"
+match_command = "^make"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 50
+
+[filters.webpack]
+description = "Compact webpack output"
+match_command = "^webpack|^npx\\s+webpack"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 20
+
+[filters.vite]
+description = "Compact vite build output"
+match_command = "^vite\\s+build|^npx\\s+vite\\s+build"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 20
+
+# ---------------------------------------------------------------------------
+# Docker
+# ---------------------------------------------------------------------------
+
+[filters.docker-ps]
+description = "Compact docker ps - strip headers"
+match_command = "^docker\\s+ps"
+strip_ansi = true
+strip_lines_matching = ["^CONTAINER ID"]
+max_lines = 20
+
+[filters.docker-build]
+description = "Compact docker build - strip step progress"
+match_command = "^docker\\s+build"
+strip_ansi = true
+strip_lines_matching = [
+  "^Step \\d+/",
+  "^#\\d+",
+  "^$",
+]
+max_lines = 20
+
+[filters.docker-compose]
+description = "Compact docker-compose output"
+match_command = "^docker-compose|^docker\\s+compose"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 30
+
+# ---------------------------------------------------------------------------
+# Testing
+# ---------------------------------------------------------------------------
+
+[filters.jest]
+description = "Compact Jest test output"
+match_command = "^jest|^npx\\s+jest"
+strip_ansi = true
+strip_lines_matching = [
+  "^PASS",
+  "^$",
+  "^\\s*\\^+",
+]
+max_lines = 50
+on_empty = "jest: passed"
+
+[filters.pytest]
+description = "Compact pytest output - show failures only"
+match_command = "^pytest"
+strip_ansi = true
+strip_lines_matching = [
+  "^=+$",
+  "^-+$",
+  "^$",
+  "^PASSED",
+  "^test session starts",
+]
+keep_lines_matching = ["FAILED", "ERROR", "failed"]
+max_lines = 30
+on_empty = "pytest: passed"
+
+[filters.vitest]
+description = "Compact Vitest output"
+match_command = "^vitest|^npx\\s+vitest"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 50
+on_empty = "vitest: passed"
+
+# ---------------------------------------------------------------------------
+# File Operations
+# ---------------------------------------------------------------------------
+
+[filters.ls]
+description = "Compact ls output"
+match_command = "^ls"
+strip_ansi = true
+max_lines = 50
+
+[filters.tree]
+description = "Compact tree output - limit depth"
+match_command = "^tree"
+strip_ansi = true
+max_lines = 30
+
+[filters.find]
+description = "Compact find output"
+match_command = "^find"
+strip_ansi = true
+max_lines = 50
+
+[filters.ripgrep]
+description = "Compact ripgrep output"
+match_command = "^rg\\s|^ripgrep"
+strip_ansi = true
+max_lines = 50
+
+[filters.grep]
+description = "Compact grep output"
+match_command = "^grep"
+strip_ansi = true
+max_lines = 50
+
+# ---------------------------------------------------------------------------
+# System Commands
+# ---------------------------------------------------------------------------
+
+[filters.df]
+description = "Compact df output"
+match_command = "^df"
+strip_ansi = true
+strip_lines_matching = ["^Filesystem"]
+max_lines = 10
+
+[filters.du]
+description = "Compact du output"
+match_command = "^du"
+strip_ansi = true
+max_lines = 20
+
+[filters.ps]
+description = "Compact ps output"
+match_command = "^ps"
+strip_ansi = true
+strip_lines_matching = ["^\\s*PID"]
+max_lines = 20
+
+# ---------------------------------------------------------------------------
+# Infrastructure
+# ---------------------------------------------------------------------------
+
+[filters.terraform-plan]
+description = "Compact terraform plan output"
+match_command = "^terraform\\s+plan"
+strip_ansi = true
+strip_lines_matching = [
+  "^$",
+  "^\\s*$",
+  "No changes",
+]
+max_lines = 50
+
+[filters.terraform-apply]
+description = "Compact terraform apply output"
+match_command = "^terraform\\s+apply"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 30
+
+[filters.helm]
+description = "Compact helm output"
+match_command = "^helm"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 30
+
+[filters.kubectl]
+description = "Compact kubectl output"
+match_command = "^kubectl"
+strip_ansi = true
+strip_lines_matching = ["^$"]
+max_lines = 30

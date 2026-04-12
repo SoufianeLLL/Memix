@@ -37,6 +37,7 @@ use crate::recorder::flight::{FlightRecorder, FlightRecord};
 use crate::workspace_registry::{WorkspaceRegistry, RegistrySnapshot};
 use crate::indexer_manager::IndexerManager;
 use crate::observer::observer_manager::ObserverManager;
+use crate::runtime::TerminalProxy;
 
 pub struct AppState {
     pub storage: Arc<dyn StorageBackend + Send + Sync>,
@@ -470,6 +471,7 @@ pub fn build_router(
         // Token Engine
         .route("/api/v1/tokens/count", post(count_tokens))
         .route("/api/v1/tokens/optimize", post(optimize_tokens))
+        .route("/api/v1/terminal/execute", post(execute_terminal_command))
 		.route("/api/v1/context/compile", post(compile_context))
 		.route("/api/v1/agents/config", get(get_agent_configs))
 		.route("/api/v1/agents/reports", get(get_agent_reports))
@@ -1605,7 +1607,7 @@ async fn purge_project(
 async fn daemon_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "status": "healthy",
-        "version": "0.11.3-beta",
+        "version": "0.11.4-beta",
         "workspace_root": state.workspace_root,
         "project_id": state.active_project_id,
         "features": [
@@ -1754,6 +1756,56 @@ async fn optimize_tokens(
 		"budget": req.budget,
 		"sections_count": n
 	})))
+}
+
+/// Execute a terminal command with token-efficient output filtering
+#[derive(Deserialize)]
+pub struct TerminalExecuteRequest {
+    pub command: String,
+    #[serde(default)]
+    pub filter_enabled: bool,
+}
+
+async fn execute_terminal_command(
+	Json(req): Json<TerminalExecuteRequest>,
+) -> impl IntoResponse {
+	let proxy = if req.filter_enabled {
+		TerminalProxy::new()
+	} else {
+		TerminalProxy::disabled()
+	};
+	
+	match proxy.execute(&req.command).await {
+		Ok(result) => {
+			// Record token savings to session counters
+			if result.tokens_saved > 0 {
+				tracing::info!(
+					"Terminal proxy saved {} tokens ({:.1}%) via filter {:?}",
+					result.tokens_saved,
+					result.savings_percent(),
+					result.filter_applied
+				);
+			}
+			
+			(StatusCode::OK, Json(serde_json::json!({
+				"output": result.output,
+				"exit_code": result.exit_code,
+				"filter_applied": result.filter_applied,
+				"raw_tokens": result.raw_tokens,
+				"filtered_tokens": result.filtered_tokens,
+				"tokens_saved": result.tokens_saved,
+				"savings_percent": result.savings_percent(),
+				"duration_ms": result.duration_ms
+			}))).into_response()
+		}
+		Err(e) => {
+			(StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+				"error": e.to_string(),
+				"output": "",
+				"exit_code": -1
+			}))).into_response()
+		}
+	}
 }
 
 async fn compile_context(

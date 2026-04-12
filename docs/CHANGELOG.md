@@ -6,6 +6,26 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ---
 
+## [1.8.6] (Daemon: 0.11.4-beta) — 2026-04-12
+### Added
+- **TOML Filter System:** 8-stage declarative pipeline for terminal output optimization.
+  - 60+ built-in filters for common commands (git, npm, cargo, docker, etc.).
+  - Reduces token consumption by 60-90% for filtered commands.
+- **Terminal Proxy:** Command interception with token-efficient output.
+  - New `/api/v1/terminal/execute` endpoint.
+  - Automatic filter matching by command regex.
+  - Raw output tee on failure for debugging.
+  - Token savings tracking per command.
+- **Token Savings Tracking:** Session counters for terminal proxy savings.
+
+### Technical
+- Added `shell-words` crate for command parsing.
+- New `daemon/src/runtime/` module for terminal proxy.
+- New `daemon/src/token/toml_filter.rs` with `CompiledFilter` and `TomlFilterRegistry`.
+- Built-in TOML filters at `daemon/src/token/filters/builtin.toml`.
+
+---
+
 ## [1.8.5] (Daemon: 0.11.3-beta) — 2026-04-05
 ### Fixed
 - **Slow/Hanging Brain Initialization:** Fixed race condition causing init to hang for minutes.

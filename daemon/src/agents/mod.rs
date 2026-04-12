@@ -11,6 +11,8 @@ use crate::observer::differ::SemanticDiff;
 use crate::observer::graph::DependencyGraph;
 use crate::observer::parser::AstNodeFeature;
 
+pub mod terminal_proxy;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AgentTrigger {
     FileSave,

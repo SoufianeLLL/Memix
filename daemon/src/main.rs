@@ -52,6 +52,7 @@ pub mod learning;
 pub mod license;
 pub mod workspace_registry;
 pub mod indexer_manager;
+pub mod runtime;
 mod constants;
 
 use crate::agents::{AgentRuntime, SessionStartContext};
