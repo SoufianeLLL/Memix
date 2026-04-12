@@ -29,11 +29,14 @@ impl HybridStorage {
     /// Create hybrid storage. Redis is optional based on config.
     pub async fn new(config: &AppConfig) -> Result<Self> {
         // Use workspace_root if available, otherwise use a fallback that won't be created
+        // IMPORTANT: The fallback should NOT create a 'default' subdirectory
         let data_dir = config.workspace_root.clone()
             .map(|ws| PathBuf::from(&ws).join(".memix"))
             .unwrap_or_else(|| {
-                // Fallback - but this shouldn't normally be used
-                PathBuf::from(".memix/default")
+                // Fallback to user home .memix (not .memix/default)
+                dirs::home_dir()
+                    .map(|h| h.join(".memix"))
+                    .unwrap_or_else(|| PathBuf::from(".memix"))
             });
         
         // SQLite is always created (but doesn't create data_dir until needed)

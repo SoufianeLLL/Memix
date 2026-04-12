@@ -868,6 +868,11 @@ async fn main() -> anyhow::Result<()> {
 	let workspace_root_clone = agent_workspace_root.to_string_lossy().to_string();
 
 	tokio::spawn(async move {
+		// CRITICAL: Set workspace_root BEFORE any database access
+		if let Some(hybrid) = storage_backend_clone.as_any().downcast_ref::<crate::storage::hybrid::HybridStorage>() {
+			hybrid.as_sqlite().set_workspace_root(&project_id_clone, PathBuf::from(&workspace_root_clone)).await;
+		}
+		
 		let mut runtime = agent_runtime_clone.lock().await;
 		for report in runtime.process_session_start(&SessionStartContext {
 			project_id: project_id_clone.clone(),
@@ -930,9 +935,17 @@ async fn main() -> anyhow::Result<()> {
 	if let Some(project_id) = app_config.project_id.clone() {
 		let storage_for_migrations = storage_backend.clone();
 		let startup_ready_migrations = startup_ready.clone();
+		let workspace_root_for_migrations = app_config.workspace_root.clone();
 		tokio::spawn(async move {
 			// Wait for daemon socket to be bound before hitting Redis
 			startup_ready_migrations.notified().await;
+			
+			// CRITICAL: Set workspace_root BEFORE any database access
+			// This prevents creating a database in the fallback location
+			if let (Some(ws), Some(hybrid)) = (&workspace_root_for_migrations, storage_for_migrations.as_any().downcast_ref::<crate::storage::hybrid::HybridStorage>()) {
+				hybrid.as_sqlite().set_workspace_root(&project_id, PathBuf::from(ws)).await;
+			}
+			
 			match tokio::time::timeout(
 				std::time::Duration::from_secs(10),
 				migrations::run_project_migrations(storage_for_migrations, &project_id),
