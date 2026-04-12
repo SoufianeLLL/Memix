@@ -26,7 +26,7 @@ use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command as AsyncCommand;
 
-use crate::token::{CompiledFilter, TOML_FILTER_REGISTRY};
+use crate::token::TOML_FILTER_REGISTRY;
 
 /// Terminal proxy that intercepts and filters command output
 pub struct TerminalProxy {

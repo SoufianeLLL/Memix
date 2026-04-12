@@ -1,3 +1,9 @@
+pub mod compiler;
+pub mod hierarchy;
+
+pub use compiler::{BudgetCompiledContext, BudgetContextCompiler, CompilerConfig};
+pub use hierarchy::{ContextLayer, HierarchyResolver, ResolvedContext};
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};

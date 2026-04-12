@@ -6,6 +6,35 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ---
 
+## [1.8.7] (Daemon: 0.11.4) - 2026-04-12
+### Added
+- **Token History Persistence:** SQLite-backed token usage tracking over time.
+  - `TokenHistory` module with async persistence via `sqlx`.
+  - Tracks input/output tokens, costs, cache hit rates per project.
+  - New endpoints: `GET /api/v1/tokens/history`, `GET /api/v1/tokens/history/all`.
+- **Proactive Risk Assessment API:** File modification risk analysis before edits.
+  - `RiskAnalyzer` assesses risk based on dependency count, recent breakage, hot code, core infrastructure, and known issues.
+  - Risk levels: Low, Medium, High, Critical with actionable recommendations.
+  - New endpoints: `GET /api/v1/risk/assess/:file`, `GET /api/v1/risk/high`.
+- **Budget-Fit Context Compiler:** Advanced context packet generation.
+  - `BudgetContextCompiler` with phases: relevant-file elimination, AST skeleton extraction, brain deduplication, history compaction, rules pruning, ranking, and budget fitting.
+  - `BudgetCompiledContext` with sections, included/excluded files, and compilation metadata.
+- **Hierarchy Resolution:** Layered context inheritance for monorepos.
+  - `HierarchyResolver` with override modes: Merge, Override, Extend.
+  - `ContextLayer` supports parent-child context inheritance.
+  - New endpoint: `GET /api/v1/context/hierarchy?path=...`.
+- **Adaptive Learning Module:** Filter performance tracking and optimization.
+  - `AdaptiveLearner` tracks filter applications, savings, and satisfaction rates.
+  - `suggest_improvements()` for underperforming filters.
+- **CommandTracker SQLx Migration:** Refactored `CommandTracker` to use `sqlx` for SQLite persistence instead of JSON fallback.
+
+### Technical
+- New modules: `token/history.rs`, `risk/mod.rs`, `context/compiler.rs`, `context/hierarchy.rs`, `learning/adaptive.rs`.
+- All new modules integrated with proper re-exports and API routes.
+- Removed beta designation from daemon and extension versions.
+
+---
+
 ## [1.8.6] (Daemon: 0.11.4-beta) — 2026-04-12
 ### Added
 - **TOML Filter System:** 8-stage declarative pipeline for terminal output optimization.
@@ -17,12 +46,30 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   - Raw output tee on failure for debugging.
   - Token savings tracking per command.
 - **Token Savings Tracking:** Session counters for terminal proxy savings.
+- **Agent Hooks System:** Command interception for AI agents.
+  - Claude Code hook (PreToolUse shell script)
+  - Cursor hook (preToolUse shell script)
+  - Windsurf rules (.windsurfrules prompt guidance)
+  - Automatic command rewrite via daemon API
+  - Dangerous command blocking (rm -rf /, curl | bash)
+  - Confirmation prompts for destructive operations
+- **Command Registry:** Classification and rewrite engine.
+  - Pattern matching for 60+ commands
+  - Ignored patterns (pipes, redirects, heredocs)
+  - Denied patterns (dangerous operations)
+  - Ask patterns (destructive but allowed with confirmation)
+- **Hooks API:** New endpoints for agent integration.
+  - `POST /api/v1/hooks/rewrite` - Classify and rewrite commands
+  - `POST /api/v1/hooks/install` - Install hooks for agents
+  - `GET /api/v1/hooks/status` - Check hook installation status
 
 ### Technical
 - Added `shell-words` crate for command parsing.
 - New `daemon/src/runtime/` module for terminal proxy.
 - New `daemon/src/token/toml_filter.rs` with `CompiledFilter` and `TomlFilterRegistry`.
+- New `daemon/src/hooks/` module with registry, installer, and agent-specific hooks.
 - Built-in TOML filters at `daemon/src/token/filters/builtin.toml`.
+- Zero overhead hook execution.
 
 ---
 

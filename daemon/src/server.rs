@@ -472,6 +472,17 @@ pub fn build_router(
         .route("/api/v1/tokens/count", post(count_tokens))
         .route("/api/v1/tokens/optimize", post(optimize_tokens))
         .route("/api/v1/terminal/execute", post(execute_terminal_command))
+        .route("/api/v1/hooks/rewrite", post(rewrite_command))
+        .route("/api/v1/hooks/install", post(install_hooks))
+        .route("/api/v1/hooks/status", get(get_hooks_status))
+        .route("/api/v1/discovery/patterns", get(get_discovered_patterns))
+        .route("/api/v1/discovery/suggestions", get(get_filter_suggestions))
+        .route("/api/v1/discovery/stats", get(get_command_stats))
+        .route("/api/v1/risk/assess/:file", get(assess_file_risk))
+        .route("/api/v1/risk/high", get(get_high_risk_files))
+        .route("/api/v1/tokens/history", get(get_token_history))
+        .route("/api/v1/tokens/history/all", get(get_all_token_history_stats))
+        .route("/api/v1/context/hierarchy", get(get_context_hierarchy))
 		.route("/api/v1/context/compile", post(compile_context))
 		.route("/api/v1/agents/config", get(get_agent_configs))
 		.route("/api/v1/agents/reports", get(get_agent_reports))
@@ -1607,7 +1618,7 @@ async fn purge_project(
 async fn daemon_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "status": "healthy",
-        "version": "0.11.4-beta",
+        "version": "0.11.4",
         "workspace_root": state.workspace_root,
         "project_id": state.active_project_id,
         "features": [
@@ -1806,6 +1817,206 @@ async fn execute_terminal_command(
 			}))).into_response()
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Agent Hooks API
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct RewriteRequest {
+    pub command: String,
+}
+
+async fn rewrite_command(
+	Json(req): Json<RewriteRequest>,
+) -> impl IntoResponse {
+	let result = crate::hooks::COMMAND_REGISTRY.rewrite(&req.command);
+	
+	let response = match &result.classification {
+		crate::hooks::Classification::Supported { rewritten, category, estimated_savings_pct } => {
+			serde_json::json!({
+				"classification": "Supported",
+				"original": result.original,
+				"rewritten": rewritten,
+				"category": category,
+				"estimated_savings_pct": estimated_savings_pct,
+				"filter_applied": result.filter_applied,
+				"estimated_tokens_saved": result.estimated_tokens_saved
+			})
+		}
+		crate::hooks::Classification::Unsupported { base_command } => {
+			serde_json::json!({
+				"classification": "Unsupported",
+				"original": result.original,
+				"base_command": base_command
+			})
+		}
+		crate::hooks::Classification::Ignored => {
+			serde_json::json!({
+				"classification": "Ignored",
+				"original": result.original
+			})
+		}
+		crate::hooks::Classification::Denied { reason, suggestion } => {
+			serde_json::json!({
+				"classification": "Denied",
+				"original": result.original,
+				"reason": reason,
+				"suggestion": suggestion
+			})
+		}
+		crate::hooks::Classification::Ask { rewritten, prompt } => {
+			serde_json::json!({
+				"classification": "Ask",
+				"original": result.original,
+				"rewritten": rewritten,
+				"prompt": prompt
+			})
+		}
+	};
+	
+	(StatusCode::OK, Json(response))
+}
+
+#[derive(Deserialize)]
+pub struct InstallHooksRequest {
+    #[serde(default)]
+    pub agents: Vec<String>,
+}
+
+async fn install_hooks(
+	Json(req): Json<InstallHooksRequest>,
+) -> impl IntoResponse {
+	let installer = crate::hooks::HookInstaller::new();
+	
+	let installed = if req.agents.is_empty() {
+		match installer.install_all() {
+			Ok(list) => list,
+			Err(e) => {
+				return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+					"error": e.to_string(),
+					"installed": []
+				})));
+			}
+		}
+	} else {
+		// Install specific agents
+		req.agents.into_iter().filter_map(|agent| {
+			match agent.as_str() {
+				"claude-code" => installer.install_claude_code().ok().map(|_| agent),
+				"cursor" => installer.install_cursor().ok().map(|_| agent),
+				"windsurf" => installer.install_windsurf().ok().map(|_| agent),
+				_ => None,
+			}
+		}).collect()
+	};
+	
+	(StatusCode::OK, Json(serde_json::json!({
+		"installed": installed,
+		"message": format!("Installed hooks for {} agent(s)", installed.len())
+	})))
+}
+
+async fn get_hooks_status() -> impl IntoResponse {
+	let installer = crate::hooks::HookInstaller::new();
+	let status = installer.status();
+	
+	(StatusCode::OK, Json(serde_json::json!({
+		"hooks": status
+	})))
+}
+
+// ---------------------------------------------------------------------------
+// Command Discovery API
+// ---------------------------------------------------------------------------
+
+async fn get_discovered_patterns() -> impl IntoResponse {
+	let tracker = match crate::discovery::CommandTracker::new() {
+		Ok(t) => t,
+		Err(e) => {
+			return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+				"error": e.to_string(),
+				"patterns": []
+			})));
+		}
+	};
+	
+	let detector = crate::discovery::PatternDetector::default();
+	
+	let patterns = match detector.detect(&tracker) {
+		Ok(p) => p,
+		Err(e) => {
+			return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+				"error": e.to_string(),
+				"patterns": []
+			})));
+		}
+	};
+	
+	(StatusCode::OK, Json(serde_json::json!({
+		"patterns": patterns,
+		"total": patterns.len()
+	})))
+}
+
+async fn get_filter_suggestions() -> impl IntoResponse {
+	let tracker = match crate::discovery::CommandTracker::new() {
+		Ok(t) => t,
+		Err(e) => {
+			return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+				"error": e.to_string(),
+				"suggestions": []
+			})));
+		}
+	};
+	
+	let detector = crate::discovery::PatternDetector::default();
+	let suggester = crate::discovery::FilterSuggester::new();
+	
+	let patterns = match detector.detect(&tracker) {
+		Ok(p) => p,
+		Err(e) => {
+			return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+				"error": e.to_string(),
+				"suggestions": []
+			})));
+		}
+	};
+	
+	let suggestions = suggester.suggest(&patterns);
+	
+	(StatusCode::OK, Json(serde_json::json!({
+		"suggestions": suggestions,
+		"total": suggestions.len()
+	})))
+}
+
+async fn get_command_stats() -> impl IntoResponse {
+	let tracker = match crate::discovery::CommandTracker::new() {
+		Ok(t) => t,
+		Err(e) => {
+			return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+				"error": e.to_string(),
+				"stats": []
+			})));
+		}
+	};
+	
+	let stats = match tracker.get_all_stats() {
+		Ok(s) => s,
+		Err(e) => {
+			return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+				"error": e.to_string(),
+				"stats": []
+			})));
+		}
+	};
+	
+	(StatusCode::OK, Json(serde_json::json!({
+		"stats": stats,
+		"total": stats.len()
+	})))
 }
 
 async fn compile_context(
@@ -2373,4 +2584,114 @@ async fn orchestrate(
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Risk Assessment API
+// ---------------------------------------------------------------------------
+
+async fn assess_file_risk(
+    Path(file): Path<String>,
+) -> impl IntoResponse {
+    let analyzer = crate::risk::RiskAnalyzer::new();
+    let assessment = analyzer.assess(&file);
+    
+    (StatusCode::OK, Json(serde_json::json!({
+        "assessment": assessment
+    })))
+}
+
+async fn get_high_risk_files() -> impl IntoResponse {
+    let analyzer = crate::risk::RiskAnalyzer::new();
+    let files = analyzer.get_high_risk_files();
+    
+    (StatusCode::OK, Json(serde_json::json!({
+        "high_risk_files": files
+    })))
+}
+
+// ---------------------------------------------------------------------------
+// Token History API
+// ---------------------------------------------------------------------------
+
+async fn get_token_history(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let project_id = state.active_project_id.clone().unwrap_or_else(|| "default".to_string());
+    
+    let history = match crate::token::TokenHistory::new() {
+        Ok(h) => h,
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                "error": e.to_string()
+            })));
+        }
+    };
+    
+    // Initialize pool asynchronously would be needed in real impl
+    let stats = match history.get_stats(&project_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return (StatusCode::OK, Json(serde_json::json!({
+                "stats": null,
+                "message": "No token history found for this project"
+            })));
+        }
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                "error": e.to_string()
+            })));
+        }
+    };
+    
+    (StatusCode::OK, Json(serde_json::json!({
+        "stats": stats
+    })))
+}
+
+async fn get_all_token_history_stats() -> impl IntoResponse {
+    let history = match crate::token::TokenHistory::new() {
+        Ok(h) => h,
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                "error": e.to_string()
+            })));
+        }
+    };
+    
+    let all_stats = match history.get_all_stats().await {
+        Ok(s) => s,
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                "error": e.to_string()
+            })));
+        }
+    };
+    
+    (StatusCode::OK, Json(serde_json::json!({
+        "projects": all_stats
+    })))
+}
+
+// ---------------------------------------------------------------------------
+// Context Hierarchy API
+// ---------------------------------------------------------------------------
+
+async fn get_context_hierarchy(
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let path = params.get("path").map(|s| s.as_str()).unwrap_or("");
+    let resolver = crate::context::hierarchy::HierarchyResolver::new();
+    let resolved = match resolver.resolve(path) {
+        Ok(r) => r,
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                "error": e.to_string()
+            })));
+        }
+    };
+    
+    (StatusCode::OK, Json(serde_json::json!({
+        "resolved": resolved
+    })))
 }

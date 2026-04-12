@@ -1,3 +1,7 @@
+pub mod adaptive;
+
+pub use adaptive::{AdaptiveLearner, FilterMetrics, FilterImprovement};
+
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};

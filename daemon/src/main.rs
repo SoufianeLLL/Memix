@@ -53,6 +53,9 @@ pub mod license;
 pub mod workspace_registry;
 pub mod indexer_manager;
 pub mod runtime;
+pub mod hooks;
+pub mod discovery;
+pub mod risk;
 mod constants;
 
 use crate::agents::{AgentRuntime, SessionStartContext};

@@ -114,7 +114,7 @@ jobs:
         working-directory: extension
         run: |
           VSIX_NAME="memix-${{ steps.version.outputs.version }}.vsix"
-          vsce package --pre-release --out "$VSIX_NAME" --no-dependencies
+          vsce package --out "$VSIX_NAME" --no-dependencies
           echo "vsix_name=${VSIX_NAME}" >> $GITHUB_OUTPUT
           echo "Packaged: ${VSIX_NAME}"
           # Print size so you can track it over time
@@ -166,7 +166,7 @@ jobs:
         env:
           VS_MARKETPLACE_TOKEN: ${{ secrets.VS_MARKETPLACE_TOKEN }}
         run: |
-          vsce publish --pre-release --pat "$VS_MARKETPLACE_TOKEN" --packagePath "${{ needs.package.outputs.vsix_name }}"
+          vsce publish --pat "$VS_MARKETPLACE_TOKEN" --packagePath "${{ needs.package.outputs.vsix_name }}"
 
   publish-ovsx:
     name: Publish to Open VSX (VSCodium / Cursor)
@@ -273,7 +273,7 @@ jobs:
           files: |
             dist/${{ needs.package.outputs.vsix_name }}
           draft: false
-          prerelease: true
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
