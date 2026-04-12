@@ -1,5 +1,6 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use ring::digest::{digest, SHA256};
