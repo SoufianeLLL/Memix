@@ -1618,7 +1618,7 @@ async fn purge_project(
 async fn daemon_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "status": "healthy",
-        "version": "0.11.4",
+        "version": "0.11.5",
         "workspace_root": state.workspace_root,
         "project_id": state.active_project_id,
         "features": [

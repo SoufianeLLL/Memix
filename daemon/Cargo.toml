@@ -1,6 +1,6 @@
 [package]
 name = "memix-daemon"
-version = "0.11.4"
+version = "0.11.5"
 edition = "2021"
 authors = ["DigitalVize LLC"]
 description = "High-performance Memix backend daemon for persistent AI memory"

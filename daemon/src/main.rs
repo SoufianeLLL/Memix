@@ -136,7 +136,31 @@ async fn process_pending_brain_update(
 			if let Some(ack) = pending_ack_path {
 				let _ = tokio::fs::write(
 					ack,
-					serde_json::json!({"ok": false, "error": format!("invalid_schema: {}", e)}).to_string(),
+					serde_json::json!({
+						"ok": false,
+						"error": format!("invalid_schema: {}", e),
+						"help": "You wrote data at the WRONG LEVEL. Data must be wrapped in 'upserts' array.",
+						"expected_schema": {
+							"project_id": "YOUR_PROJECT_ID",
+							"upserts": [
+								{
+									"id": "entry_id_here",
+									"project_id": "YOUR_PROJECT_ID",
+									"kind": "context",
+									"content": "{\"your\": \"json_data\"}",
+									"tags": ["tag1", "tag2"],
+									"created_at": "2026-04-12T00:00:00Z",
+									"updated_at": "2026-04-12T00:00:00Z"
+								}
+							],
+							"deletes": ["entry_id_to_delete"]
+						},
+						"common_mistakes": [
+							"Putting 'content' or 'source' at top level instead of inside 'upserts' array",
+							"Forgetting to wrap your entry in an array",
+							"Not including 'id' field in each upsert entry"
+						]
+					}).to_string(),
 				)
 				.await;
 			}

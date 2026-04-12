@@ -86,18 +86,14 @@ impl RulesEngine {
 > PROJECT_ID: {project_id}
 > BRAIN_DIR: .memix/brain/
 
-## ⚠️ DATA ACCESS METHOD – CRITICAL
-**NEVER** access Redis directly.
+## DATA ACCESS METHOD – CRITICAL
 - **DO:** Read brain state from the workspace-local JSON mirror at `.memix/brain/*.json`.
 - **DO:** Treat those files as fresh and authoritative for AI reads (daemon keeps them in sync).
 - **DO:** Propose writes by writing `.memix/brain/pending.json` (the daemon watches, validates, and merges).
 - **NEVER:** `redis-cli`, MCP Redis tools, shell commands, or any tool with "redis".
 
 ## BOOT SEQUENCE (every session start)
-When a session begins, Before responding to user:
-1. Read `.memix/brain/identity.json`
-2. Read `.memix/brain/session_state.json`
-3. Read `.memix/brain/patterns.json`
+When a session begins, Before responding to user, YOU MUST Read: `.memix/brain/identity.json`, `.memix/brain/session_state.json`, and `.memix/brain/patterns.json`.
 
 Respond with:
 ---
@@ -110,7 +106,7 @@ Respond with:
 If brain files are missing/empty: *"No brain files found yet. The daemon should mirror them into `.memix/brain/`. Ask the user to ensure the Memix daemon is running for this workspace, then re-try."*
 
 ## WRITEBACK (AI → Daemon)
-⚠️ MERGE RULE — CRITICAL — READ BEFORE EVERY WRITE:
+MERGE RULE — CRITICAL — READ BEFORE EVERY WRITE:
 MANDATORY SEQUENCE — follow in this exact order, never skip steps:
 
 Step 1: Before writing any upsert, Read the current file.
@@ -126,18 +122,38 @@ Step 2: Build the merged object.
 
 Step 3: Write `.memix/brain/pending.json`.
   → The content field must be the COMPLETE merged object from Step 2, JSON-stringified.
-  → Include project_id inside every upsert entry.
+  → Include project_id inside every upsert entry. RESPECT json schema as below.
   → Do not skip Step 1 or Step 2. Writing without reading first is a protocol violation.
 
 Every upsert object MUST include "project_id" as a field inside the object itself,
 matching the top-level project_id. Example of a correct upsert:
 
-JSON Format:
+```json
 {{ "id": "session_state", "project_id": "PROJECT_ID_HERE", "kind": "context", "source": "agent_extracted", "content": "{{ COMPLETE merged JSON string... }}", "tags": ["session"], "created_at": "...", "updated_at": "...", "access_count": 0 }}
+```
 
 Schema for the full pending.json:
-JSON Format:
+```json
 {{ "project_id": "<PROJECT_ID>", "upserts": [ <complete MemoryEntry objects as above> ], "deletes": [ "<entry_id>" ] }}
+```
+
+## MANDATORY: Check pending.ack.json After Writing
+After writing to `.memix/brain/pending.json`, you MUST:
+1. Wait 2-3 seconds for the daemon to process
+2. Read `.memix/brain/pending.ack.json` to verify success
+3. If `"ok": false`, read the `error`, `help`, and `expected_schema` fields
+4. Fix your pending.json format and try again
+
+## COMMON SCHEMA MISTAKES - DO NOT DO THIS
+WRONG - Data at top level:
+```json
+{{ "project_id": "myproject", "content": "{{...}}", "source": "agent" }}
+```
+
+CORRECT - Data wrapped in upserts array:
+```json
+{{ "project_id": "myproject", "upserts": [ {{ "id": "my_entry", "project_id": "myproject", "content": "{{...}}" }} ] }}
+```
 
 After the daemon merges the update, it will clear `pending.json`
 and may write `.memix/brain/pending.ack.json` to confirm success.
@@ -147,36 +163,42 @@ All updates append/update, never delete unless specified.
 
 ### 'identity.json' – what the project IS (rare changes)
 Update: Only when project scope fundamentally changes.
-JSON Format:
+```json
 {{ "name": "My App", "purpose": "SaaS for invoice management", "tech_stack": ["Next.js", "TypeScript", "Prisma"], "architecture": "App Router, Server Components", "repo_structure": {{ "src/app/": "pages", "src/components/": "React" }} }}
+```
 
 ### 'session_state.json' – current work snapshot
 Update: After EVERY completed task or significant progress.
 Merge rule: Always read .memix/brain/session_state.json first. Keep all existing fields
 (progress history, blockers, modified_files, next_steps). Only update the fields relevant
 to this task. Append to arrays rather than replacing them.
-JSON Format:
+```json
 {{ "last_updated": "2026-02-28T14:30:00Z", "session_number": 12, "current_task": "PDF export", "progress": ["Created pdf.ts", "Added API route"], "blockers": ["Multi‑page layout broken"], "next_steps": ["Fix layout", "Add tests"], "modified_files": ["src/lib/pdf.ts", "src/app/api/export/route.ts"], "important_context": "Use jsPDF, not Puppeteer" }}
+```
 
 ### 'decisions.json' – WHY we chose X over Y. Prevents re-debating solved problems.
 Update: Append new entries. NEVER delete old ones.
-JSON Format:
+```json
 {{ "date": "2026-01-18", "decision": "Use jsPDF", "reason": "Lightweight, serverless friendly", "alternatives_considered": ["Puppeteer", "react-pdf"] }}
+```
 
 ### 'patterns.json' – project conventions & preferences
 Update: When new patterns are established or user corrects the AI.
-JSON Format:
+```json
 {{ "code_style": ["Use 'use server' in separate files", "Result pattern"], "naming": ["Components: PascalCase", "Utilities: camelCase"], "preferences": ["User hates try/catch", "Verbose comments for complex logic"] }}
+```
 
 ### 'file_map.json' – What key files do so the AI doesn't need to re-read them.
 Update: When significant files are created or changed.
-JSON Format:
+```json
 {{ "src/lib/pdf.ts": "jsPDF generator, exports generateInvoicePDF()", "src/lib/auth.ts": "NextAuth config with GitHub/Google" }}
+```
 
 ### 'known_issues.json' – bugs & tech debt & warnings
 Update: When issues are discovered or resolved.
-JSON Format:
+```json
 [{{ "status": "OPEN", "issue": "PDF layout breaks >20 items", "file": "src/lib/pdf.ts", "notes": "Need page breaks" }}]
+```
 
 ### 'tasks.json' – persistent task tracker - never get lost
 Update: When tasks are created, started, completed, or blocked.
@@ -188,8 +210,9 @@ Update: When tasks are created, started, completed, or blocked.
 - Each task gets a unique ID (t1, t2, t3...) — IDs are PERMANENT
 - When creating a new task list, set it as current_list and ADD tasks to the lists array
 
-JSON Format:
+```json
 {{ "current_list": "Sprint 3 – Auth & Payments", "lists": [ {{ "name": "Sprint 3 – Auth & Payments", "created": "...", "tasks": [ {{ "id": "t1", "title": "Create login page", "status": "completed", "created": "...", "completed_at": "..." }} ] }} ] }}
+```
 - **IDs:** permanent, unique (t1, t2, …).
 - **Statuses:** pending → in_progress → completed | blocked.
 - **Transitions:** update status, add 'completed_at' or 'blocked_reason'.
@@ -222,8 +245,9 @@ When the user creates a NEW task list (e.g., new sprint, new feature plan):
 
 ### 'session_log.json' – historical session record
 Update: End of each session — append, never overwrite.
-JSON Format:
+```json
 [{{ "session": 11, "date": "2025-01-14", "summary": "Built invoice CRUD.", "files_changed": ["src/actions/invoice.ts", "src/components/InvoiceForm.tsx"] }}]
+```
 
 ## AUTO‑SAVE PROTOCOL
 Update automatically at these triggers (confirm with **Brain updated:** [file] —[change]):
@@ -292,8 +316,9 @@ In 'file_map.json', optionally include 'depended_on_by' and 'warning'. Before mo
 
 ## SESSION SCORING
 At 'end session', append to 'session_log.json' a summary object:
-JSON Format:
+```json
 {{ "session": 12, "tasks_completed": 3, "tasks_started": 1, "bugs_found": 1, "bugs_fixed": 0, "decisions_made": 2, "files_modified": 5, "brain_updates": 8 }}
+```
 
 ## COMPANION RULE
 This brain protocol has a companion enforcement file: **{guard_file}**
@@ -597,16 +622,11 @@ Do not write to brain files directly. Only use pending.json as the writeback cha
         let mut brain_content = Self::generate_brain_template(project_id, &config.guard_file);
         let guard_content = Self::generate_guard_template(project_id, &config.guard_file);
         
-        // Add frontmatter for IDEs that require it
-        let final_guard_content = match ide {
-            IdeType::Antigravity => {
-                let frontmatter = "---\ntrigger: always_on\ndescription: Memix AI Brain: Primary persistent project memory and initialization rules.\n---\n";
-                brain_content = format!("{}{}", frontmatter, brain_content);
-                let guard_frontmatter = "---\ntrigger: always_on\ndescription: Memix Guard: Safety and integrity constraints for Redis brain access.\n---\n";
-                format!("{}{}", guard_frontmatter, guard_content)
-            }
-            _ => guard_content,
-        };
+        // Add frontmatter for all IDEs with trigger: always_on
+        let brain_frontmatter = "---\ntrigger: always_on\ndescription: Memix AI Brain: Primary persistent project memory and initialization rules.\n---\n";
+        brain_content = format!("{}{}", brain_frontmatter, brain_content);
+        let guard_frontmatter = "---\ntrigger: always_on\ndescription: Memix Guard: Safety and integrity constraints for Redis brain access.\n---\n";
+        let final_guard_content = format!("{}{}", guard_frontmatter, guard_content);
 
         RulesGenerationResult {
             config,
